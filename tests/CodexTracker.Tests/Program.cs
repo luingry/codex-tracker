@@ -3,6 +3,35 @@ using System.Text.Json;
 using CodexTracker;
 using CodexTracker.Core;
 
+var resizeWorkArea = new ResizeWorkArea(-1920, 0, 1920, 1080);
+var compactStart = new ResizeBounds(-1500, 200, 124, 104);
+var compactLeft = ManualResizeGeometry.ResizeCompact(compactStart, new(-100, 0), ResizeHandle.Left, resizeWorkArea);
+Assert(compactLeft.Right == compactStart.Right && compactLeft.Top == compactStart.Top, "left compact resize preserves the opposite right/top anchor on a negative-coordinate monitor");
+var compactRight = ManualResizeGeometry.ResizeCompact(compactStart, new(100, 0), ResizeHandle.Right, resizeWorkArea);
+Assert(compactRight.Left == compactStart.Left && compactRight.Top == compactStart.Top, "right compact resize preserves the opposite left/top anchor");
+var compactTop = ManualResizeGeometry.ResizeCompact(compactStart, new(0, -50), ResizeHandle.Top, resizeWorkArea);
+Assert(compactTop.Bottom == compactStart.Bottom && compactTop.Left == compactStart.Left, "top compact resize preserves the opposite bottom/left anchor");
+var compactBottom = ManualResizeGeometry.ResizeCompact(compactStart, new(0, 50), ResizeHandle.Bottom, resizeWorkArea);
+Assert(compactBottom.Top == compactStart.Top && compactBottom.Left == compactStart.Left, "bottom compact resize preserves the opposite top/left anchor");
+foreach (var handle in new[] { ResizeHandle.Left | ResizeHandle.Top, ResizeHandle.Right | ResizeHandle.Top, ResizeHandle.Left | ResizeHandle.Bottom, ResizeHandle.Right | ResizeHandle.Bottom })
+{
+    var resized = ManualResizeGeometry.ResizeCompact(compactStart, new(handle.HasFlag(ResizeHandle.Left) ? -80 : 80, handle.HasFlag(ResizeHandle.Top) ? -40 : 40), handle, resizeWorkArea);
+    Assert((!handle.HasFlag(ResizeHandle.Left) || resized.Right == compactStart.Right) && (!handle.HasFlag(ResizeHandle.Right) || resized.Left == compactStart.Left) && (!handle.HasFlag(ResizeHandle.Top) || resized.Bottom == compactStart.Bottom) && (!handle.HasFlag(ResizeHandle.Bottom) || resized.Top == compactStart.Top), "compact corner resize preserves each opposite corner anchor");
+}
+var limitedCompact = ManualResizeGeometry.ResizeCompact(new(-1800, 100, 124, 104), new(-1000, 0), ResizeHandle.Left, resizeWorkArea);
+Assert(limitedCompact.Left == -1920 && limitedCompact.Right == -1676 && limitedCompact.Right == -1676, "compact work-area limit stops at the monitor edge without moving the opposite anchor");
+var maxCompact = ManualResizeGeometry.ResizeCompact(compactStart, new(1000, 0), ResizeHandle.Right, resizeWorkArea);
+Assert(maxCompact.Width == 320 && maxCompact.Left == compactStart.Left && maxCompact.Height * 62 == maxCompact.Width * 52, "compact maximum and 62:52 ratio preserve the opposite anchor");
+var minCompact = ManualResizeGeometry.ResizeCompact(compactStart, new(-1000, 0), ResizeHandle.Right, resizeWorkArea);
+Assert(minCompact.Width == 62 && minCompact.Left == compactStart.Left, "compact minimum width preserves the opposite anchor");
+var detailedStart = new ResizeBounds(-1400, 300, 300, 240);
+var detailedTop = ManualResizeGeometry.ResizeVertical(detailedStart, new(500, -100), ResizeHandle.Top, resizeWorkArea, 50, 620);
+Assert(detailedTop.Left == detailedStart.Left && detailedTop.Width == detailedStart.Width && detailedTop.Bottom == detailedStart.Bottom, "detailed/settings resize is vertical-only and preserves the bottom anchor from top handle");
+var detailedBottom = ManualResizeGeometry.ResizeVertical(detailedStart, new(-500, 1000), ResizeHandle.Bottom, resizeWorkArea, 50, 620);
+Assert(detailedBottom.Left == detailedStart.Left && detailedBottom.Width == detailedStart.Width && detailedBottom.Top == detailedStart.Top && detailedBottom.Height == 620, "detailed/settings bottom resize keeps horizontal bounds and honors maximum height");
+var detailedMinimum = ManualResizeGeometry.ResizeVertical(detailedStart, new(0, 1000), ResizeHandle.Top, resizeWorkArea, 50, 620);
+Assert(detailedMinimum.Height == 50 && detailedMinimum.Bottom == detailedStart.Bottom, "detailed/settings minimum height preserves the opposite anchor");
+
 var payload = JsonDocument.Parse("""
 {
   "rateLimits": {

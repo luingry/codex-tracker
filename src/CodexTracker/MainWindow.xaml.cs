@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private System.Windows.Point _dragStart;
     private System.Windows.Point _resizeStartScreen;
     private Rect _resizeStartBounds;
+    private ResizeWorkArea _resizeWorkArea;
     private ResizeEdge _resizeEdge;
     // The compact XAML reserves a 52 x 42 gauge surface inside the 62 x 52 window.
     private const double CompactAspectRatio = 62d / 52d;
@@ -263,6 +264,7 @@ public partial class MainWindow : Window
             _resizeGestureActive = true;
             _resizeStartScreen = GetScreenPoint(position);
             _resizeStartBounds = new Rect(Left, Top, ActualWidth, ActualHeight);
+            _resizeWorkArea = GetResizeWorkArea();
             _manualResize = CaptureMouse();
             e.Handled = true;
             return;
@@ -370,42 +372,50 @@ public partial class MainWindow : Window
 
     private void ApplyManualResize(System.Windows.Point screenPoint)
     {
-        var dx = screenPoint.X - _resizeStartScreen.X;
-        var dy = screenPoint.Y - _resizeStartScreen.Y;
-        var work = SystemParameters.WorkArea;
+        var delta = new ResizeVector(screenPoint.X - _resizeStartScreen.X, screenPoint.Y - _resizeStartScreen.Y);
+        var start = new ResizeBounds(_resizeStartBounds.Left, _resizeStartBounds.Top, _resizeStartBounds.Width, _resizeStartBounds.Height);
+        var handle = ToResizeHandle(_resizeEdge);
 
         if (_viewModel.Expanded || SettingsPanel.Visibility == Visibility.Visible)
         {
-            var top = _resizeStartBounds.Top;
-            var height = _resizeStartBounds.Height;
-            if (_resizeEdge.HasFlag(ResizeEdge.Top))
-            {
-                height -= dy;
-                top += dy;
-            }
-            else if (_resizeEdge.HasFlag(ResizeEdge.Bottom)) height += dy;
-
-            height = Math.Clamp(height, MinHeight, MaxHeight);
-            if (_resizeEdge.HasFlag(ResizeEdge.Top)) top = _resizeStartBounds.Bottom - height;
-            top = Math.Clamp(top, work.Top, work.Bottom - height);
-            Top = top;
-            Height = Math.Min(height, work.Bottom - top);
+            var bounds = ManualResizeGeometry.ResizeVertical(start, delta, handle, _resizeWorkArea, MinHeight, MaxHeight);
+            Top = bounds.Top;
+            Height = bounds.Height;
             return;
         }
 
-        var horizontalDelta = _resizeEdge.HasFlag(ResizeEdge.Left) ? -dx : _resizeEdge.HasFlag(ResizeEdge.Right) ? dx : 0;
-        var verticalDelta = (_resizeEdge.HasFlag(ResizeEdge.Top) ? -dy : dy) * CompactAspectRatio;
-        var delta = Math.Abs(horizontalDelta) >= Math.Abs(verticalDelta) ? horizontalDelta : verticalDelta;
-        var width = Math.Clamp(_resizeStartBounds.Width + delta, CompactMinWidth, CompactMaxWidth);
-        var heightCompact = width / CompactAspectRatio;
-        var left = _resizeEdge.HasFlag(ResizeEdge.Left) ? _resizeStartBounds.Right - width : _resizeStartBounds.Left;
-        var topCompact = _resizeEdge.HasFlag(ResizeEdge.Top) ? _resizeStartBounds.Bottom - heightCompact : _resizeStartBounds.Top;
-        left = Math.Clamp(left, work.Left, work.Right - width);
-        topCompact = Math.Clamp(topCompact, work.Top, work.Bottom - heightCompact);
-        Left = left;
-        Top = topCompact;
-        SetCompactSize(width);
+        var compactBounds = ManualResizeGeometry.ResizeCompact(start, delta, handle, _resizeWorkArea, CompactMinWidth, CompactMaxWidth);
+        Left = compactBounds.Left;
+        Top = compactBounds.Top;
+        SetCompactSize(compactBounds.Width);
     }
+
+    private ResizeWorkArea GetResizeWorkArea()
+    {
+        var topLeft = PointToScreen(new System.Windows.Point(0, 0));
+        var bottomRight = PointToScreen(new System.Windows.Point(ActualWidth, ActualHeight));
+        var windowRect = new NativeRect
+        {
+            Left = (int)Math.Floor(topLeft.X), Top = (int)Math.Floor(topLeft.Y),
+            Right = (int)Math.Ceiling(bottomRight.X), Bottom = (int)Math.Ceiling(bottomRight.Y)
+        };
+        var monitor = MonitorFromRect(ref windowRect, MonitorDefaultToNearest);
+        var monitorInfo = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref monitorInfo))
+            return new ResizeWorkArea(SystemParameters.WorkArea.Left, SystemParameters.WorkArea.Top, SystemParameters.WorkArea.Width, SystemParameters.WorkArea.Height);
+
+        var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice;
+        var workTopLeft = new System.Windows.Point(monitorInfo.Work.Left, monitorInfo.Work.Top);
+        var workBottomRight = new System.Windows.Point(monitorInfo.Work.Right, monitorInfo.Work.Bottom);
+        if (transform is { } deviceToDip)
+        {
+            workTopLeft = deviceToDip.Transform(workTopLeft);
+            workBottomRight = deviceToDip.Transform(workBottomRight);
+        }
+        return new ResizeWorkArea(workTopLeft.X, workTopLeft.Y, workBottomRight.X - workTopLeft.X, workBottomRight.Y - workTopLeft.Y);
+    }
+
+    private static ResizeHandle ToResizeHandle(ResizeEdge edge) => (ResizeHandle)(int)edge;
 
     private void FinishManualResize(bool endGesture)
     {
@@ -489,4 +499,15 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr hIcon);
     [DllImport("user32.dll")] private static extern bool ReleaseCapture();
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+    private const uint MonitorDefaultToNearest = 2;
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromRect(ref NativeRect rect, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Auto)] private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo monitorInfo);
+    [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)] private struct MonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor;
+        public NativeRect Work;
+        public uint Flags;
+    }
 }

@@ -1,6 +1,6 @@
 ; Per-user installer. Configuration in %APPDATA% is intentionally retained on uninstall.
 #define AppName "Codex Tracker"
-#define AppVersion "0.4.7"
+#define AppVersion "0.4.8"
 #define AppPublisher "Codex Tracker"
 #define AppExeName "CodexTracker.exe"
 
