@@ -8,9 +8,9 @@
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\..\assets\brand\codex-tracker.ico</ApplicationIcon>
-    <Version>0.4.8</Version>
-    <AssemblyVersion>0.4.8.0</AssemblyVersion>
-    <FileVersion>0.4.8.0</FileVersion>
+    <Version>0.4.10</Version>
+    <AssemblyVersion>0.4.10.0</AssemblyVersion>
+    <FileVersion>0.4.10.0</FileVersion>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="..\CodexTracker.Core\CodexTracker.Core.csproj" /></ItemGroup>
   <ItemGroup><Resource Include="..\..\assets\fonts\SourceSans3.ttf" Link="assets\fonts\SourceSans3.ttf" /><Resource Include="..\..\assets\fonts\AtkinsonHyperlegibleNext.ttf" Link="assets\fonts\AtkinsonHyperlegibleNext.ttf" /></ItemGroup>

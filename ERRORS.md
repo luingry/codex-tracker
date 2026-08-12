@@ -1,5 +1,12 @@
 # Erros e solucoes conhecidas
 
+## Alternancia Compacto/Detalhado restaurava a largura transitoriamente limitada
+
+- **Sintoma:** depois de redimensionar o compacto, alternar para detalhado e voltar podia abrir o compacto em 320 px, apesar do slot persistido conter, por exemplo, 124 px.
+- **Causa:** `ApplyWindowModeSize` lia corretamente o slot compacto, mas chamava `SetCompactSize` com a propriedade `Width` transitoria da janela, ainda herdada do detalhado. Tambem o `SizeChanged` reagia as alteracoes programaticas de constraints durante a alternancia e podia recalcular o compacto com esse valor intermediario.
+- **Solucao:** a politica publica seleciona explicitamente o tamanho do modo de destino e o ramo compacto aplica esse slot. O listener `SizeChanged` foi removido: `ResizeMode=NoResize` e `ApplyManualResize` ja sao a unica via de resize do usuario e preservam a proporcao.
+- **Prevencao:** em transicoes de modo, nunca derive o destino de propriedades WPF que podem refletir constraints do modo anterior. Testar a sequencia compacto -> detalhado -> compacto repetida com slots distintos, e manter resize de usuario em um caminho explicito separado de layout programatico.
+
 ## `WS_THICKFRAME` reservava uma faixa não-cliente no widget sem moldura
 
 - **Sintoma:** o compacto exibia uma faixa horizontal no topo mesmo sem `WindowChrome`; ajustes de brush e borda DWM apenas mascaravam a cor.

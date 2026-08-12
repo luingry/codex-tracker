@@ -29,7 +29,6 @@ public partial class MainWindow : Window
     private int _connecting;
     private int _analyticsRunning;
     private int _refreshTick;
-    private bool _adjustingCompactSize;
     private bool _dragCandidate;
     private bool _manualResize;
     private bool _resizeGestureActive;
@@ -40,9 +39,9 @@ public partial class MainWindow : Window
     private ResizeWorkArea _resizeWorkArea;
     private ResizeEdge _resizeEdge;
     // The compact XAML reserves a 52 x 42 gauge surface inside the 62 x 52 window.
-    private const double CompactAspectRatio = 62d / 52d;
-    private const double CompactMinWidth = 62d;
-    private const double CompactMaxWidth = 320d;
+    private const double CompactAspectRatio = WidgetSizePolicy.CompactAspectRatio;
+    private const double CompactMinWidth = WidgetSizePolicy.CompactMinWidth;
+    private const double CompactMaxWidth = WidgetSizePolicy.CompactMaxWidth;
     private const double ResizeBorderThickness = 6d;
     private const int WmNcLButtonDown = 0x00A1;
     private const int HtCaption = 0x0002;
@@ -62,17 +61,14 @@ public partial class MainWindow : Window
         DataContext = _viewModel;
         _demo = demo;
         _settings = _store.Load();
-        Width = Math.Clamp(IsLegacyDefaultCompactSize(_settings) ? CompactMinWidth : _settings.Width, CompactMinWidth, CompactMaxWidth);
-        Height = Math.Clamp(_settings.Height, 50, 620);
-        Left = Math.Max(SystemParameters.WorkArea.Left, Math.Min(_settings.Left, SystemParameters.WorkArea.Right - Width));
-        Top = Math.Max(SystemParameters.WorkArea.Top, Math.Min(_settings.Top, SystemParameters.WorkArea.Bottom - Height));
         Topmost = _settings.IsTopmost;
         ThemeManager.Apply(_settings.Theme);
         _viewModel.Topmost = Topmost;
         _viewModel.SetCurrency(_settings.CurrencyCode);
         _viewModel.Expanded = _settings.IsExpanded;
         ApplyWindowModeSize();
-        SizeChanged += OnWindowSizeChanged;
+        Left = Math.Max(SystemParameters.WorkArea.Left, Math.Min(_settings.Left, SystemParameters.WorkArea.Right - Width));
+        Top = Math.Max(SystemParameters.WorkArea.Top, Math.Min(_settings.Top, SystemParameters.WorkArea.Bottom - Height));
         Loaded += (_, _) =>
         {
             _refreshTimer.Start();
@@ -170,6 +166,7 @@ public partial class MainWindow : Window
     private void ToggleTopmost(object sender, RoutedEventArgs e) { Topmost = !Topmost; _viewModel.Topmost = Topmost; Save(); }
     private void ToggleDetailed(object sender, RoutedEventArgs e)
     {
+        CaptureCurrentModeSize();
         _viewModel.Expanded = !_viewModel.Expanded;
         ApplyWindowModeSize();
         Save();
@@ -179,10 +176,12 @@ public partial class MainWindow : Window
     {
         if (SettingsPanel.Visibility == Visibility.Visible)
         {
+            CaptureCurrentModeSize();
             SettingsPanel.Visibility = Visibility.Collapsed;
             ThemeManager.Apply(_settings.Theme);
             ApplyBackdrop(_settings.Theme);
             ApplyWindowModeSize();
+            Save();
 
             return;
         }
@@ -194,12 +193,9 @@ public partial class MainWindow : Window
         UpdateCurrencyRateVisibility();
         RateBox.Text = _settings.UsdBrl.ToString(System.Globalization.CultureInfo.InvariantCulture);
         PathBox.Text = _settings.CodexPath ?? "";
+        CaptureCurrentModeSize();
         SettingsPanel.Visibility = Visibility.Visible;
-        MinWidth = MaxWidth = 300;
-        Width = 300;
-        MinHeight = 440;
-        MaxHeight = 720;
-        Height = Math.Max(Height, 440);
+        ApplyWindowModeSize();
     }
     private void CurrencyChanged(object sender, SelectionChangedEventArgs e) => UpdateCurrencyRateVisibility();
     private void UpdateCurrencyRateVisibility() => RatePanel.Visibility = CurrencyBox.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -223,6 +219,7 @@ public partial class MainWindow : Window
     }
     private void ApplySettings(object sender, RoutedEventArgs e)
     {
+        CaptureCurrentModeSize();
         decimal.TryParse(RateBox.Text.Replace(',', '.'), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var rate);
         var theme = ThemeToggle.IsChecked == true ? "Escuro" : "Claro";
         var currency = SettingsStore.NormalizeCurrency((CurrencyBox.SelectedItem as ComboBoxItem)?.Tag as string);
@@ -232,8 +229,9 @@ public partial class MainWindow : Window
         _viewModel.SetCurrency(currency);
         _viewModel.Expanded = DetailedBox.IsChecked == true;
         Topmost = TopmostBox.IsChecked == true;
+        SettingsPanel.Visibility = Visibility.Collapsed;
         ApplyWindowModeSize();
-        Save(); SettingsPanel.Visibility = Visibility.Collapsed;
+        Save();
         if (_viewModel.Expanded) _ = RefreshAnalyticsAsync();
         _ = LoadAsync();
     }
@@ -455,13 +453,23 @@ public partial class MainWindow : Window
     {
         Chrome.Opacity = 0;
         Chrome.IsHitTestVisible = false;
-        if (_viewModel.Expanded)
+        var mode = CurrentVisualMode;
+        var size = WidgetSizePolicy.SelectModeSize(_settings.ModeSizes!, mode);
+        if (mode == WidgetVisualMode.Detailed)
         {
-            MinWidth = MaxWidth = 300;
-            Width = 300;
-            MinHeight = 260;
-            MaxHeight = 720;
-            Height = Math.Clamp(Height, 360, 720);
+            MinWidth = MaxWidth = WidgetSizePolicy.DetailedWidth;
+            Width = WidgetSizePolicy.DetailedWidth;
+            MinHeight = WidgetSizePolicy.DetailedMinHeight;
+            MaxHeight = WidgetSizePolicy.DetailedMaxHeight;
+            Height = size.Height;
+        }
+        else if (mode == WidgetVisualMode.Settings)
+        {
+            MinWidth = MaxWidth = WidgetSizePolicy.DetailedWidth;
+            Width = WidgetSizePolicy.DetailedWidth;
+            MinHeight = WidgetSizePolicy.SettingsMinHeight;
+            MaxHeight = WidgetSizePolicy.SettingsMaxHeight;
+            Height = size.Height;
         }
         else
         {
@@ -469,32 +477,27 @@ public partial class MainWindow : Window
             MaxWidth = CompactMaxWidth;
             MinHeight = CompactMinWidth / CompactAspectRatio;
             MaxHeight = CompactMaxWidth / CompactAspectRatio;
-            SetCompactSize(Math.Clamp(Width, CompactMinWidth, CompactMaxWidth));
+            SetCompactSize(size.Width);
         }
-    }
-    private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (_adjustingCompactSize || _viewModel.Expanded || SettingsPanel.Visibility == Visibility.Visible) return;
-        var width = e.WidthChanged
-            ? Math.Clamp(ActualWidth, CompactMinWidth, CompactMaxWidth)
-            : Math.Clamp(ActualHeight * CompactAspectRatio, CompactMinWidth, CompactMaxWidth);
-        SetCompactSize(width);
     }
     private void SetCompactSize(double width)
     {
-        _adjustingCompactSize = true;
-        try
-        {
-            Width = width;
-            Height = width / CompactAspectRatio;
-        }
-        finally { _adjustingCompactSize = false; }
+        Width = width;
+        Height = width / CompactAspectRatio;
     }
-    private static bool IsLegacyDefaultCompactSize(AppSettings settings) =>
-        (Math.Abs(settings.Width - 276d) < 0.01d && Math.Abs(settings.Height - 54d) < 0.01d) ||
-        (Math.Abs(settings.Width - 156d) < 0.01d && Math.Abs(settings.Height - 52d) < 0.01d) ||
-        (Math.Abs(settings.Width - 76d) < 0.01d && Math.Abs(settings.Height - 52d) < 0.01d);
-    private void Save() => _store.Save(_settings with { Left = Left, Top = Top, Width = Width, Height = Height, IsExpanded = _viewModel.Expanded, IsTopmost = Topmost });
+    private WidgetVisualMode CurrentVisualMode => SettingsPanel.Visibility == Visibility.Visible
+        ? WidgetVisualMode.Settings
+        : _viewModel.Expanded ? WidgetVisualMode.Detailed : WidgetVisualMode.Compact;
+    private void CaptureCurrentModeSize()
+    {
+        _settings = _settings with { ModeSizes = WidgetSizePolicy.With(_settings.ModeSizes!, CurrentVisualMode, new(Width, Height)) };
+    }
+    private void Save()
+    {
+        CaptureCurrentModeSize();
+        _settings = _settings with { Left = Left, Top = Top, IsExpanded = _viewModel.Expanded, IsTopmost = Topmost };
+        _store.Save(_settings);
+    }
     private void OnClosing(object? sender, CancelEventArgs e) { _refreshTimer.Stop(); _shutdown.Cancel(); _client?.DisposeAsync().AsTask().GetAwaiter().GetResult(); _tray?.Dispose(); Save(); }
     [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr hIcon);
     [DllImport("user32.dll")] private static extern bool ReleaseCapture();
