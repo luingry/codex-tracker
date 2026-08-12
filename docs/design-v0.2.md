@@ -1,0 +1,5 @@
+# Design v0.3
+
+A superfície porcelain usa sage, apricot e lavender para organizar estados sem bordas, cards ou brilho. O tema escuro mantém os mesmos relacionamentos tonais com ink claro e superfícies profundas, sem preto puro. Um gauge vetorial circular apresenta a quota restante: trilho tonal é 100%, arco sage é disponibilidade. O compacto mostra somente o gauge e a porcentagem semanal restante; ações surgem apenas por hover ou foco e continuam no tray. O detalhado preserva tokens, custo, forecast e ranking por espaço e tipografia.
+
+Source Sans 3 é usada para valores e Atkinson Hyperlegible Next para texto. Ambas são fontes livres embarcadas sob OFL em `assets/fonts`; isso evita depender de fontes do sistema e favorece leitura rápida. Os SVGs Lucide ISC estão em `assets/lucide` com proveniência e licença. Analytics lê apenas metadados `token_count` locais, nunca prompts. `total_token_usage` é tratado como snapshot cumulativo e reduzido a deltas monotônicos. Tarifas são equivalentes API, com cobertura parcial para modelo sem preço conhecido.
