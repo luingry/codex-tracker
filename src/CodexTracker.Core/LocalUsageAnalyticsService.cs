@@ -5,10 +5,11 @@ using System.Security.Cryptography;
 namespace CodexTracker.Core;
 
 public sealed record ModelUsage(string Model, long Tokens, decimal CostUsd, bool Priced);
-public sealed record DailyTokenUsage(DateOnly Day, long Tokens, decimal UsdCost = 0, decimal BrlCost = 0);
+public sealed record DailyTokenUsage(DateTime Day, long Tokens, decimal UsdCost = 0, decimal BrlCost = 0);
 public sealed record TimedTokenUsage(DateTimeOffset At, long Tokens, decimal CostUsd = 0);
+public sealed record TimedModelUsage(DateTimeOffset At, string Model, long Tokens, decimal CostUsd = 0, bool Priced = false);
 public sealed record UsageWindowEstimate(long Tokens, decimal CostUsd, decimal CostBrl);
-public sealed record UsageAnalytics(long TodayTokens, long MonthTokens, decimal MonthUsd, decimal MonthBrl, double CoveragePercent, IReadOnlyList<ModelUsage> Models, decimal TodayUsd = 0, decimal TodayBrl = 0, IReadOnlyList<DailyTokenUsage>? DailySeries = null, IReadOnlyList<TimedTokenUsage>? Timeline = null, decimal UsdBrl = 0)
+public sealed record UsageAnalytics(long TodayTokens, long MonthTokens, decimal MonthUsd, decimal MonthBrl, double CoveragePercent, IReadOnlyList<ModelUsage> Models, decimal TodayUsd = 0, decimal TodayBrl = 0, IReadOnlyList<DailyTokenUsage>? DailySeries = null, IReadOnlyList<TimedTokenUsage>? Timeline = null, decimal UsdBrl = 0, IReadOnlyList<TimedModelUsage>? ModelTimeline = null)
 {
     public long TokensInWindow(DateTimeOffset startInclusive, DateTimeOffset endExclusive) =>
         (Timeline ?? []).Where(x => x.At >= startInclusive && x.At < endExclusive).Sum(x => x.Tokens);
@@ -19,6 +20,13 @@ public sealed record UsageAnalytics(long TodayTokens, long MonthTokens, decimal 
         var costUsd = events.Sum(x => x.CostUsd);
         return new(events.Sum(x => x.Tokens), costUsd, costUsd * UsdBrl);
     }
+
+    public IReadOnlyList<ModelUsage> ModelsInWindow(DateTimeOffset startInclusive, DateTimeOffset endExclusive) =>
+        (ModelTimeline ?? []).Where(x => x.At >= startInclusive && x.At < endExclusive)
+            .GroupBy(x => new { x.Model, x.Priced })
+            .Select(group => new ModelUsage(group.Key.Model, group.Sum(x => x.Tokens), group.Sum(x => x.CostUsd), group.Key.Priced))
+            .OrderByDescending(x => x.Tokens)
+            .ToArray();
 
     public long? TokensInWeeklyWindow(QuotaWindow? weekly) => weekly?.ResetsAt is { } reset
         ? TokensInWindow(reset.AddDays(-7), reset)
@@ -32,6 +40,9 @@ public sealed record UsageAnalytics(long TodayTokens, long MonthTokens, decimal 
 public sealed class LocalUsageAnalyticsService
 {
     private readonly Dictionary<string, CachedFile> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Func<DateTimeOffset> _clock;
+
+    public LocalUsageAnalyticsService(Func<DateTimeOffset>? clock = null) => _clock = clock ?? (() => DateTimeOffset.Now);
     public int FilesParsedLastRead { get; private set; }
     public int FilesRebuiltLastRead { get; private set; }
     public int FilesAppendedLastRead { get; private set; }
@@ -63,13 +74,14 @@ public sealed class LocalUsageAnalyticsService
         LogicalStreamsLastRead = 0;
         DuplicatePhysicalFilesIgnoredLastRead = 0;
         var stopwatch = Stopwatch.StartNew();
-        var now = DateTimeOffset.Now;
+        var now = _clock();
         // An active seven-day quota window can start no earlier than seven days ago.
         // Keep one extra day for clock/refresh skew while bounding memory independently
         // of the total session-history size.
         var timelineCutoff = now.ToUniversalTime().AddDays(-8);
         var buckets = new Dictionary<BucketKey, Aggregate>();
         var timeline = new Dictionary<TimelineKey, TimelineAggregate>();
+        var modelTimeline = new Dictionary<ModelTimelineKey, TimelineAggregate>();
         var roots = root is not null
             ? [root]
             : DefaultRoots(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
@@ -90,7 +102,7 @@ public sealed class LocalUsageAnalyticsService
                 if (!hasCommittedTail)
                 {
                     var partial = ParseAggregate(file.Path, 0, null, "unknown", file.IsFork, timelineCutoff);
-                    candidates.Add(new(file, new CachedFile(signature, file.IsFork, partial.Buckets, partial.Timeline, partial.LastTotals, partial.LastModel, "")));
+                    candidates.Add(new(file, new CachedFile(signature, file.IsFork, partial.Buckets, partial.Timeline, partial.ModelTimeline, partial.LastTotals, partial.LastModel, "")));
                     FilesParsedLastRead++;
                     FilesRebuiltLastRead++;
                     BytesReadLastRead += signature.Length;
@@ -100,7 +112,7 @@ public sealed class LocalUsageAnalyticsService
                 if (!_cache.TryGetValue(file.Path, out var cached) || cached.IsFork != file.IsFork || signature.Length < cached.Signature.Length || (signature.Length == cached.Signature.Length && signature.LastWriteUtcTicks != cached.Signature.LastWriteUtcTicks) || (signature.Length > cached.Signature.Length && PrefixMarker.Create(file.Path, cached.Signature.Length) != cached.PrefixMarker))
                 {
                     var parsed = ParseAggregate(file.Path, 0, null, "unknown", file.IsFork, timelineCutoff);
-                    cached = new CachedFile(signature, file.IsFork, parsed.Buckets, parsed.Timeline, parsed.LastTotals, parsed.LastModel, PrefixMarker.Create(file.Path, signature.Length));
+                    cached = new CachedFile(signature, file.IsFork, parsed.Buckets, parsed.Timeline, parsed.ModelTimeline, parsed.LastTotals, parsed.LastModel, PrefixMarker.Create(file.Path, signature.Length));
                     _cache[file.Path] = cached;
                     FilesParsedLastRead++;
                     FilesRebuiltLastRead++;
@@ -112,6 +124,7 @@ public sealed class LocalUsageAnalyticsService
                     var appended = ParseAggregate(file.Path, previousLength, cached.LastTotals, cached.LastModel, cached.IsFork, timelineCutoff);
                     MergeBuckets(cached.Buckets, appended.Buckets);
                     MergeTimeline(cached.Timeline, appended.Timeline);
+                    MergeModelTimeline(cached.ModelTimeline, appended.ModelTimeline);
                     cached = cached with { Signature = signature, LastTotals = appended.LastTotals ?? cached.LastTotals, LastModel = appended.LastModel, PrefixMarker = PrefixMarker.Create(file.Path, signature.Length) };
                     _cache[file.Path] = cached;
                     FilesParsedLastRead++;
@@ -119,6 +132,7 @@ public sealed class LocalUsageAnalyticsService
                     BytesReadLastRead += signature.Length - previousLength;
                 }
                 foreach (var staleTimeline in cached.Timeline.Keys.Where(key => key.At < timelineCutoff).ToArray()) cached.Timeline.Remove(staleTimeline);
+                foreach (var staleTimeline in cached.ModelTimeline.Keys.Where(key => key.At < timelineCutoff).ToArray()) cached.ModelTimeline.Remove(staleTimeline);
                 candidates.Add(new(file, cached));
             }
             catch (Exception ex) { SanitizedLogger.Write("Analytics file error: " + ex.GetType().Name); }
@@ -133,6 +147,7 @@ public sealed class LocalUsageAnalyticsService
         {
             MergeBuckets(buckets, candidate.Cache.Buckets);
             MergeTimeline(timeline, candidate.Cache.Timeline);
+            MergeModelTimeline(modelTimeline, candidate.Cache.ModelTimeline);
         }
         LogicalStreamsLastRead = logicalCandidates.Length;
         DuplicatePhysicalFilesIgnoredLastRead = candidates.Count - logicalCandidates.Length;
@@ -145,21 +160,22 @@ public sealed class LocalUsageAnalyticsService
             return new ModelUsage(g.Key, tokens, CalculateCostUsd(g.Select(x => x.Value), Prices[key]), true);
         }).OrderByDescending(x => x.Tokens).ToArray();
         var total = models.Sum(x => x.Tokens);
-        var todayBuckets = buckets.Where(x => x.Key.Day == DateOnly.FromDateTime(now.LocalDateTime.Date)).ToArray();
+        var todayBuckets = buckets.Where(x => x.Key.Day == now.LocalDateTime.Date).ToArray();
         var todayUsd = CalculateCostUsd(todayBuckets);
         var daysInMonth = DateTime.DaysInMonth(now.Year, now.Month);
         var dailySeries = Enumerable.Range(1, daysInMonth)
             .Select(day =>
             {
-                var date = new DateOnly(now.Year, now.Month, day);
+                var date = new DateTime(now.Year, now.Month, day);
                 var dayBuckets = buckets.Where(x => x.Key.Day == date).ToArray();
                 var costUsd = CalculateCostUsd(dayBuckets);
                 return new DailyTokenUsage(date, dayBuckets.Sum(x => x.Value.Total), costUsd, costUsd * usdBrl);
             })
             .ToArray();
         var timedSeries = timeline.OrderBy(x => x.Key.At).Select(x => new TimedTokenUsage(x.Key.At, x.Value.Tokens, x.Value.CostUsd)).ToArray();
+        var timedModelSeries = modelTimeline.OrderBy(x => x.Key.At).Select(x => new TimedModelUsage(x.Key.At, x.Key.Model, x.Value.Tokens, x.Value.CostUsd, x.Key.Priced)).ToArray();
         SanitizedLogger.Write("Analytics refreshed: models=" + models.Length + ", files=" + files.Length + ", streams=" + LogicalStreamsLastRead + ", duplicateSnapshots=" + DuplicatePhysicalFilesIgnoredLastRead + ", ms=" + stopwatch.ElapsedMilliseconds);
-        return new(todayBuckets.Sum(x => x.Value.Total), total, models.Sum(x => x.CostUsd), models.Sum(x => x.CostUsd) * usdBrl, total == 0 ? 0 : 100d * models.Where(x => x.Priced).Sum(x => x.Tokens) / total, models, todayUsd, todayUsd * usdBrl, dailySeries, timedSeries, usdBrl);
+        return new(todayBuckets.Sum(x => x.Value.Total), total, models.Sum(x => x.CostUsd), models.Sum(x => x.CostUsd) * usdBrl, total == 0 ? 0 : 100d * models.Where(x => x.Priced).Sum(x => x.Tokens) / total, models, todayUsd, todayUsd * usdBrl, dailySeries, timedSeries, usdBrl, timedModelSeries);
     }
 
     private static decimal CalculateCostUsd(IEnumerable<Aggregate> aggregates, (decimal Input, decimal Cached, decimal Output) price) => aggregates.Sum(value => (Math.Max(value.Input - value.Cached, 0) * price.Input + value.Cached * price.Cached + (value.Output + value.Reasoning) * price.Output) / 1_000_000m);
@@ -209,6 +225,7 @@ public sealed class LocalUsageAnalyticsService
     {
         var buckets = new Dictionary<BucketKey, Aggregate>();
         var timeline = new Dictionary<TimelineKey, TimelineAggregate>();
+        var modelTimeline = new Dictionary<ModelTimelineKey, TimelineAggregate>();
         using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         stream.Seek(offset, SeekOrigin.Begin);
         using var reader = new StreamReader(stream);
@@ -234,28 +251,30 @@ public sealed class LocalUsageAnalyticsService
                 var at = ReadTimestamp(root) ?? File.GetLastWriteTimeUtc(file);
                 if (delta.Total > 0)
                 {
-                    var key = new BucketKey(DateOnly.FromDateTime(at.LocalDateTime.Date), model);
-                    buckets[key] = buckets.GetValueOrDefault(key) + new Aggregate(delta.Input, delta.Cached, delta.Output, delta.Reasoning, delta.Total);
+                    var key = new BucketKey(at.LocalDateTime.Date, model);
+                    buckets[key] = Net48Compatibility.GetValueOrDefault(buckets, key) + new Aggregate(delta.Input, delta.Cached, delta.Output, delta.Reasoning, delta.Total);
                     if (at >= timelineCutoff)
                     {
                         var timelineKey = new TimelineKey(at);
                         var priceKey = Prices.Keys.FirstOrDefault(key => string.Equals(model, key, StringComparison.OrdinalIgnoreCase));
                         var costUsd = priceKey is null ? 0 : CalculateCostUsd([new Aggregate(delta.Input, delta.Cached, delta.Output, delta.Reasoning, delta.Total)], Prices[priceKey]);
-                        timeline[timelineKey] = timeline.GetValueOrDefault(timelineKey) + new TimelineAggregate(delta.Total, costUsd);
+                        timeline[timelineKey] = Net48Compatibility.GetValueOrDefault(timeline, timelineKey) + new TimelineAggregate(delta.Total, costUsd);
+                        var modelTimelineKey = new ModelTimelineKey(at, model, priceKey is not null);
+                        modelTimeline[modelTimelineKey] = Net48Compatibility.GetValueOrDefault(modelTimeline, modelTimelineKey) + new TimelineAggregate(delta.Total, costUsd);
                     }
                 }
             }
             catch (JsonException) { SanitizedLogger.Write("Analytics malformed JSONL line skipped"); }
         }
-        return new ParseAggregateResult(buckets, timeline, baseline, model);
+        return new ParseAggregateResult(buckets, timeline, modelTimeline, baseline, model);
     }
 
     private static string? ReadString(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     private static DateTimeOffset? ReadTimestamp(JsonElement element) => ReadString(element, "timestamp") is { } value && DateTimeOffset.TryParse(value, out var timestamp) ? timestamp.ToUniversalTime() : null;
     private sealed record FileDescriptor(string Path, string SessionId, string FileId, bool IsFork, DateTimeOffset? StartedAt);
     private sealed record LogicalFileCandidate(FileDescriptor File, CachedFile Cache);
-    private sealed record CachedFile(FileSignature Signature, bool IsFork, Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Totals? LastTotals, string LastModel, string PrefixMarker);
-    private sealed record ParseAggregateResult(Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Totals? LastTotals, string LastModel);
+    private sealed record CachedFile(FileSignature Signature, bool IsFork, Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Totals? LastTotals, string LastModel, string PrefixMarker);
+    private sealed record ParseAggregateResult(Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Totals? LastTotals, string LastModel);
     private readonly record struct FileSignature(long Length, long LastWriteUtcTicks)
     {
         public static FileSignature Create(string path)
@@ -273,7 +292,7 @@ public sealed class LocalUsageAnalyticsService
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             Feed(stream, hash, 0, (int)Math.Min(chunk, length));
             if (length > chunk) Feed(stream, hash, Math.Max(0, length - chunk), (int)Math.Min(chunk, length));
-            return Convert.ToHexString(hash.GetHashAndReset());
+            return Net48Compatibility.ToHexString(hash.GetHashAndReset());
         }
         private static void Feed(FileStream stream, IncrementalHash hash, long start, int count)
         {
@@ -291,8 +310,9 @@ public sealed class LocalUsageAnalyticsService
         return last is '\n' or '\r';
     }
 
-    private readonly record struct BucketKey(DateOnly Day, string Model);
+    private readonly record struct BucketKey(DateTime Day, string Model);
     private readonly record struct TimelineKey(DateTimeOffset At);
+    private readonly record struct ModelTimelineKey(DateTimeOffset At, string Model, bool Priced);
     private readonly record struct TimelineAggregate(long Tokens, decimal CostUsd)
     {
         public static TimelineAggregate operator +(TimelineAggregate left, TimelineAggregate right) => new(left.Tokens + right.Tokens, left.CostUsd + right.CostUsd);
@@ -304,12 +324,17 @@ public sealed class LocalUsageAnalyticsService
 
     private static void MergeBuckets(Dictionary<BucketKey, Aggregate> destination, IReadOnlyDictionary<BucketKey, Aggregate> source)
     {
-        foreach (var (key, value) in source) destination[key] = destination.GetValueOrDefault(key) + value;
+        foreach (var pair in source) destination[pair.Key] = Net48Compatibility.GetValueOrDefault(destination, pair.Key) + pair.Value;
     }
 
     private static void MergeTimeline(Dictionary<TimelineKey, TimelineAggregate> destination, IReadOnlyDictionary<TimelineKey, TimelineAggregate> source)
     {
-        foreach (var (key, value) in source) destination[key] = destination.GetValueOrDefault(key) + value;
+        foreach (var pair in source) destination[pair.Key] = Net48Compatibility.GetValueOrDefault(destination, pair.Key) + pair.Value;
+    }
+
+    private static void MergeModelTimeline(Dictionary<ModelTimelineKey, TimelineAggregate> destination, IReadOnlyDictionary<ModelTimelineKey, TimelineAggregate> source)
+    {
+        foreach (var pair in source) destination[pair.Key] = Net48Compatibility.GetValueOrDefault(destination, pair.Key) + pair.Value;
     }
 
     private static IEnumerable<LogicalFileCandidate> SelectNonOverlappingCandidates(IGrouping<string, LogicalFileCandidate> group)

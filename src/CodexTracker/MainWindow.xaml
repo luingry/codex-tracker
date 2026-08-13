@@ -4,10 +4,23 @@
         xmlns:local="clr-namespace:CodexTracker"
         Title="Codex Tracker"
         Width="62" Height="52" MinWidth="62" MinHeight="52"
-        WindowStyle="None" ResizeMode="NoResize"
-        Background="{DynamicResource GlassSurface}"
+        WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False"
+        AllowsTransparency="True" Background="Transparent"
         FontFamily="./assets/fonts/#Atkinson Hyperlegible Next">
-  <Border Background="{DynamicResource GlassSurface}" CornerRadius="12" ClipToBounds="True" SnapsToDevicePixels="True">
+  <Border x:Name="WindowSurface" CornerRadius="12" ClipToBounds="True" SnapsToDevicePixels="True">
+    <Border.Style>
+      <Style TargetType="Border">
+        <Setter Property="Background" Value="Transparent" />
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding Expanded}" Value="True">
+            <Setter Property="Background" Value="{DynamicResource DetailedSurface}" />
+          </DataTrigger>
+          <DataTrigger Binding="{Binding Visibility, ElementName=SettingsPanel}" Value="Visible">
+            <Setter Property="Background" Value="{DynamicResource SettingsSurface}" />
+          </DataTrigger>
+        </Style.Triggers>
+      </Style>
+    </Border.Style>
     <Grid x:Name="Root" MouseLeftButtonDown="DragWindow" MouseEnter="ShowChrome" MouseLeave="HideChrome">
       <Grid x:Name="MainContent">
         <Grid.Style>
@@ -25,35 +38,51 @@
             </Style.Triggers>
           </Style>
         </Grid.Style>
-        <!-- The compact widget scales as one peripheral weekly reading. -->
-        <Viewbox Visibility="{Binding Expanded, Converter={StaticResource CompactVisibility}}" Stretch="Uniform" Margin="5">
-          <Grid Width="52" Height="42">
-            <Grid Width="42" Height="42" HorizontalAlignment="Center" VerticalAlignment="Center">
-              <local:CircularQuotaGauge AutomationProperties.Name="Indicador de quota semanal restante" Value="{Binding RemainingPercent}"
+        <!-- The compact gauge is vector-laid out at its final size; no region crop or Viewbox raster scaling. -->
+        <Grid Visibility="{Binding Expanded, Converter={StaticResource CompactVisibility}}">
+          <Grid Width="{Binding ActualHeight, ElementName=Root, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=Gauge}"
+                Height="{Binding ActualHeight, ElementName=Root, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=Gauge}"
+                HorizontalAlignment="Center" VerticalAlignment="Center">
+              <Ellipse Width="{Binding ActualHeight, ElementName=Root, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=Background}"
+                       Height="{Binding ActualHeight, ElementName=Root, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=Background}"
+                       Fill="{DynamicResource GlassSurface}" />
+              <local:CircularQuotaGauge x:Name="CompactQuotaGauge" AutomationProperties.Name="Indicador de quota semanal restante" Value="{Binding RemainingPercent}"
                                        TrackBrush="{DynamicResource GaugeTrack}" ProgressBrush="{DynamicResource Accent}" StrokeThickness="3" />
               <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <TextBlock Text="WEEKLY" FontSize="6" FontWeight="Normal" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Center" />
-                <TextBlock Text="{Binding Weekly}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="15" FontWeight="Bold"
+                <TextBlock Text="{Binding Weekly}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="{Binding ActualWidth, ElementName=Root, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=FontSize}" FontWeight="Bold"
                            Foreground="{DynamicResource Ink}" HorizontalAlignment="Center" Margin="0,0,0,0" />
               </StackPanel>
             </Grid>
-          </Grid>
-        </Viewbox>
+        </Grid>
 
-        <ScrollViewer Visibility="{Binding Expanded, Converter={StaticResource BooleanToVisibility}}"
+        <ScrollViewer x:Name="DetailedScrollViewer" Visibility="{Binding Expanded, Converter={StaticResource BooleanToVisibility}}"
                       VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="12">
-          <StackPanel>
+          <StackPanel x:Name="DetailedContent" LayoutUpdated="DetailedContentLayoutUpdated">
             <Grid Margin="0,3,0,13">
               <Grid.ColumnDefinitions><ColumnDefinition Width="76" /><ColumnDefinition /></Grid.ColumnDefinitions>
               <Grid Width="72" Height="72" HorizontalAlignment="Left">
                 <local:CircularQuotaGauge AutomationProperties.Name="Indicador de quota semanal restante" Value="{Binding RemainingPercent}"
                                          TrackBrush="{DynamicResource GaugeTrack}" ProgressBrush="{DynamicResource Accent}" StrokeThickness="4" />
-                <TextBlock Text="{Binding Weekly}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="23" FontWeight="Bold"
+                <TextBlock Text="{Binding Weekly}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="19.55" FontWeight="Bold"
                            Foreground="{DynamicResource Ink}" HorizontalAlignment="Center" VerticalAlignment="Center" />
               </Grid>
               <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="11,0,0,0">
                 <TextBlock Text="WEEKLY" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" />
                 <TextBlock Text="{Binding Reset}" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource SoftInk}" Margin="0,3,0,0" />
+                <TextBlock Text="{Binding Forecast}" FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0">
+                  <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                      <Setter Property="Foreground" Value="{DynamicResource SoftInk}" />
+                      <Setter Property="FontWeight" Value="Normal" />
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsExhaustionRisk}" Value="True">
+                          <Setter Property="Foreground" Value="{DynamicResource RiskWarning}" />
+                          <Setter Property="FontWeight" Value="Bold" />
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </TextBlock.Style>
+                </TextBlock>
               </StackPanel>
             </Grid>
 
@@ -73,8 +102,40 @@
               <Border Grid.Column="3" Grid.RowSpan="3" Width="1" Background="{DynamicResource GaugeTrack}" Margin="0,2,0,1" />
             </Grid>
             <TextBlock Text="{Binding Coverage}" FontSize="10" Foreground="{DynamicResource SoftInk}" Margin="0,4,0,12" />
-            <TextBlock Text="{Binding Forecast}" FontSize="10" Foreground="{DynamicResource SoftInk}" TextWrapping="Wrap" Margin="0,1,0,3" />
-            <ItemsControl ItemsSource="{Binding Ranking}" Margin="0,10,0,0">
+            <Grid Margin="0,10,0,3">
+              <TextBlock Text="Ranking de uso" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" />
+              <Grid HorizontalAlignment="Right" Height="24" Width="144">
+                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                <Border Background="{DynamicResource InputSurface}" CornerRadius="12" Grid.ColumnSpan="3" />
+                <Border Background="{DynamicResource Sage}" CornerRadius="10" Margin="2">
+                  <Border.Style>
+                    <Style TargetType="Border">
+                      <Setter Property="Grid.Column" Value="2" />
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsRankingDay}" Value="True"><Setter Property="Grid.Column" Value="0" /></DataTrigger>
+                        <DataTrigger Binding="{Binding IsRankingWeek}" Value="True"><Setter Property="Grid.Column" Value="1" /></DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </Border.Style>
+                </Border>
+                <Grid Grid.ColumnSpan="3">
+                  <Grid.Resources>
+                    <Style TargetType="RadioButton">
+                      <Setter Property="Background" Value="Transparent" />
+                      <Setter Property="FontSize" Value="9" />
+                      <Setter Property="HorizontalContentAlignment" Value="Center" />
+                      <Setter Property="VerticalContentAlignment" Value="Center" />
+                      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton"><Border Background="{TemplateBinding Background}" CornerRadius="10"><ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" /></Border></ControlTemplate></Setter.Value></Setter>
+                    </Style>
+                  </Grid.Resources>
+                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                  <RadioButton Grid.Column="0" GroupName="RankingPeriod" Content="dia" IsChecked="{Binding IsRankingDay, Mode=TwoWay}" Foreground="{DynamicResource Ink}" AutomationProperties.Name="Período do ranking: dia" />
+                  <RadioButton Grid.Column="1" GroupName="RankingPeriod" Content="semana" IsChecked="{Binding IsRankingWeek, Mode=TwoWay}" Foreground="{DynamicResource Ink}" AutomationProperties.Name="Período do ranking: semana" />
+                  <RadioButton Grid.Column="2" GroupName="RankingPeriod" Content="mês" IsChecked="{Binding IsRankingMonth, Mode=TwoWay}" Foreground="{DynamicResource Ink}" AutomationProperties.Name="Período do ranking: mês" />
+                </Grid>
+              </Grid>
+            </Grid>
+            <ItemsControl ItemsSource="{Binding Ranking}" Margin="0,0,0,0">
               <ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,3"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="72" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Model}" FontSize="11" Foreground="{DynamicResource Ink}" TextTrimming="CharacterEllipsis" /><StackPanel Grid.Column="1" HorizontalAlignment="Right"><TextBlock Text="{Binding Tokens}" FontSize="10" Foreground="{DynamicResource Ink}" /><TextBlock Text="{Binding TariffNote}" FontSize="8" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Right" /></StackPanel></Grid><ProgressBar Value="{Binding Fraction}" Maximum="1" Height="4" Background="{DynamicResource Sage}" Foreground="{DynamicResource Accent}" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
             </ItemsControl>
             <StackPanel Margin="0,13,0,0">
@@ -86,6 +147,7 @@
                                      TooltipTextBrush="{DynamicResource Ink}" />
             </StackPanel>
             <TextBlock Text="{Binding Status}" FontSize="9" Foreground="{DynamicResource Accent}" Margin="0,10,0,2" />
+            <TextBlock Text="{Binding AppVersion}" FontSize="12" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Center" Margin="0,7,0,0" />
           </StackPanel>
         </ScrollViewer>
 

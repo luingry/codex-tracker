@@ -1,5 +1,35 @@
 # Erros e solucoes conhecidas
 
+## Widget restaurava na tela primaria apos uma reinstalacao com varios monitores
+
+- **Sintoma:** uma posicao persistida na tela secundaria, por exemplo `Left=2877, Top=176`, voltava para a tela primaria depois de reinstalar.
+- **Causa:** o construtor limitava `Left` e `Top` com `SystemParameters.WorkArea`, que representa apenas a area de trabalho primaria.
+- **Solucao:** a posicao persistida e aplicada sem clamp; apos criar o HWND, seus bounds nativos sao comparados com as areas de trabalho nativas de todos os monitores. Posicoes visiveis, inclusive parciais e negativas, sao mantidas. Somente uma janela inteiramente offscreen e movida para caber no monitor disponivel mais proximo, com `SetWindowPos` nativo para evitar conversao ingenua entre px e DIP em DPI misto.
+- **Prevencao:** nunca valide restauracao de janela multimonitor contra `SystemParameters.WorkArea`; use os bounds do HWND e todas as areas de trabalho reais, cobrindo tela secundaria, coordenadas negativas, visibilidade parcial e monitor removido com teste deterministico.
+
+## Visualizacao detalhada podia manter espaco vazio abaixo da versao
+
+- **Sintoma:** a janela detalhada podia ser ampliada ate 720 DIP mesmo quando seu conteudo terminava no texto da versao, deixando uma grande area vazia no rodape.
+- **Causa:** o limite maximo era fixo e independente da altura desejada pelo conteudo dentro do `ScrollViewer`; uma altura persistida maior continuava valida.
+- **Solucao:** o conteudo detalhado agora recalcula o teto da janela apos o layout, limitado pela politica existente, e reduz imediatamente a altura quando ela excede o conteudo real. A janela ainda pode ser reduzida para usar rolagem.
+- **Prevencao:** mantenha o limite superior do resize derivado do `DesiredSize` do conteudo e cubra a normalizacao do teto com teste deterministico.
+
+## Fundo retangular permanecia no widget compacto circular
+
+- **Atualizacao:** alem do fundo transparente da janela layered, o compacto agora desativa `DWMWA_NCRENDERING_POLICY` com `DWMNCRP_DISABLED` e usa `DWMWCP_DONOTROUND`; detalhado e Settings restauram rendering habilitado e cantos arredondados em toda transicao de modo e preview de tema. Isto elimina a composicao nao-cliente que pode acrescentar uma sombra sem usar `SetWindowRgn`/crop.
+
+- **Sintoma:** o modo compacto mostrava um retangulo escuro arredondado atras do gauge, mesmo com uma `Ellipse` visual de 36 x 36.
+- **Causa:** `Background=GlassSurface` da `Window` e da borda raiz ainda preenchia todo o HWND (62 x 52 DIP). Uma elipse filha nao recorta nem a superficie da janela nem seu hit testing nativo.
+- **Solucao (substituida):** `SetWindowRgn`/`CreateEllipticRgn` foi removido: o recorte nativo cortava a franja antialias do anel nas bordas. A janela agora usa `AllowsTransparency=True` e fundo transparente; somente a `Ellipse` central pinta o compacto. O gauge e o fundo sao vetores no tamanho final, derivados da altura atual (42/38 DIP no minimo, sempre com diferenca de 4 DIP), sem `Viewbox`; compacto fica sem sombra para nao introduzir uma superficie retangular.
+- **Prevencao:** nao use regioes HWND para recortar geometria WPF antialiasada. Em widgets compactos circulares, mantenha a superficie da janela transparente e deixe apenas os elementos vetoriais circulares desenharem pixels; aplique superficies retangulares somente nos modos que realmente as exigem.
+
+## Fundo detalhado parecia transparente em uma janela layered
+
+- **Sintoma:** o desktop podia ficar visivel no modo detalhado apesar de ele dever manter um painel solido.
+- **Causa:** `AllowsTransparency=True` e necessario ao compacto circular e nao muda depois do HWND; a raiz detalhada dependia de uma superficie glass generica em vez de um recurso semantico opaco.
+- **Solucao:** `DetailedSurface` totalmente opaco pinta a raiz detalhada e `SettingsSurface` pinta configuracoes; ambos acompanham o tema no `ThemeManager` e o container raiz preserva cantos arredondados.
+- **Prevencao:** em janelas layered de modos mistos, mantenha o HWND transparente global e pinte superficies opacas semanticas em cada modo retangular; valide troca de tema e abertura/fechamento das configuracoes.
+
 ## Alternancia Compacto/Detalhado restaurava a largura transitoriamente limitada
 
 - **Sintoma:** depois de redimensionar o compacto, alternar para detalhado e voltar podia abrir o compacto em 320 px, apesar do slot persistido conter, por exemplo, 124 px.
@@ -84,6 +114,13 @@
 - **Solucao:** `scripts\build-installer.ps1` consulta `PATH`, o registro de desinstalacao e os caminhos por maquina e por usuario antes de compilar.
 - **Prevencao:** use o script de build, em vez de fixar um caminho para `ISCC.exe`.
 
+## ISPP nao suporta `ReadFile` ao obter a versao do instalador
+
+- **Sintoma:** o ISCC 6.7.3 falhava ao compilar `CodexTracker.iss` quando `AppVersion` era definido por `Trim(ReadFile("..\\VERSION"))`.
+- **Causa:** `ReadFile` nao e uma funcao suportada pelo preprocessor do Inno Setup nessa versao.
+- **Solucao:** `scripts\\build-installer.ps1` le e valida `VERSION`, entao passa `/DAppVersion=<versao>` ao ISCC. O `.iss` mantem somente um fallback literal protegido por `#ifndef`, para compilacao manual.
+- **Prevencao:** deixe I/O e validacao de arquivos no script PowerShell; no ISPP use definicoes recebidas por linha de comando ou macros compativeis.
+
 ## Tema WPF falha ao alterar uma `SolidColorBrush`
 
 - **Sintoma:** a janela encerrava na inicialização com `não é possível definir uma propriedade ... estado somente leitura`.
@@ -118,3 +155,17 @@
 - **Causa:** o Restart Manager registrava todos os arquivos do runtime self-contained (462 no repro), incluia `System` junto das instancias do app e recusava o fechamento com `Permission Denied + Session Mismatch`. Duas instancias instaladas podiam coexistir e manter `clrjit.dll` carregado. O desinstalador tambem nao encerrava automaticamente o processo antes de remover os arquivos.
 - **Solucao:** `CloseApplicationsFilter` limita o Restart Manager ao executavel exato `CodexTracker.exe`; o app usa mutex por caminho instalado para impedir duplicatas futuras. Um evento nomeado acionado por `--shutdown-existing` permite ao desinstalador solicitar shutdown gracioso e aguardar a liberacao do mutex antes da remocao.
 - **Prevencao:** `scripts/test-installer-upgrade.ps1` cobre instalacao, duas instancias legadas, upgrade com app aberto, single-instance na nova versao, relancamento, uninstall com app aberto, preservacao das configuracoes e ausencia de processos/arquivos orfaos.
+
+## Validação local de instalação comparava nome incorretamente
+
+- **Sintoma:** validação local informava falha de instalação mesmo com instalador concluído, porque o DisplayVersion retornava vazio ao ler a configuração por nome esperado.
+- **Causa:** o installer registra DisplayName como Codex Tracker version <version>, e a rotina de validação buscava exatamente Codex Tracker; também usava uma visão implícita de registro sem distinguir Registry32/Registry64.
+- **Solução:** validar pela chave estável do app ({D8C84F82-ED90-4F1F-AB4E-1455E5B66C2C}_is1) ou por prefixo de DisplayName, em HKCU Uninstall com Registry64 e Registry32, e comparar DisplayVersion com VERSION.
+- **Prevenção:** durante smoke de instalação, validar FileVersion do executável instalado e DisplayVersion da chave do uninstall, sem depender de igualdade exata de nome de exibição.
+
+## Upgrade mantinha o runtime self-contained obsoleto
+
+- **Sintoma:** após atualizar do instalador .NET 8 auto-contido para o payload .NET Framework 4.8, o setup novo era pequeno, mas o diretório instalado ainda mantinha centenas de DLLs do runtime e mais de 150 MB.
+- **Causa:** a seção `[Files]` do Inno Setup copia os arquivos novos, mas não remove arquivos que deixaram de fazer parte do publish.
+- **Solução:** `[InstallDelete]` remove somente o conteúdo de `{app}` antes de copiar o novo payload. `CloseApplications` continua encerrando apenas `CodexTracker.exe`, e `%APPDATA%\CodexTracker` não é tocado.
+- **Prevenção:** toda migração que reduz ou renomeia o payload deve testar upgrade sobre a versão anterior e medir contagem/tamanho do diretório instalado, além do tamanho do setup.

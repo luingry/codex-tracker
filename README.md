@@ -41,6 +41,11 @@ dotnet run --project .\tests\CodexTracker.Tests\CodexTracker.Tests.csproj
 ```
 
 Após toda alteração funcional, gere o instalador com `scripts\finalize-build.ps1`.
+Antes de concluir uma alteração, atualize `VERSION` conforme SemVer e registre as mudanças em [CHANGELOG.md](CHANGELOG.md).
+
+## Releases
+
+A push to `main` that changes `VERSION` or `CHANGELOG.md` runs the release workflow. It builds the Windows installer, publishes tag `v<version>` with the matching changelog section, attaches the setup to the release and workflow artifacts, then removes all older releases and their tags.
 
 ## Licença
 

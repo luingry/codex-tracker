@@ -10,7 +10,7 @@ public static class WidgetSizePolicy
 {
     public const double CompactAspectRatio = 62d / 52d;
     public const double CompactMinWidth = 62d;
-    public const double CompactMaxWidth = 320d;
+    public const double CompactMaxWidth = 100d;
     public const double DetailedWidth = 300d;
     public const double DetailedMinHeight = 260d;
     public const double DetailedDefaultHeight = 360d;
@@ -32,9 +32,9 @@ public static class WidgetSizePolicy
 
         return mode switch
         {
-            WidgetVisualMode.Compact => new(Math.Clamp(value.Width, CompactMinWidth, CompactMaxWidth), Math.Clamp(value.Width, CompactMinWidth, CompactMaxWidth) / CompactAspectRatio),
-            WidgetVisualMode.Detailed => new(DetailedWidth, Math.Clamp(value.Height, DetailedMinHeight, DetailedMaxHeight)),
-            WidgetVisualMode.Settings => new(DetailedWidth, Math.Clamp(value.Height, SettingsMinHeight, SettingsMaxHeight)),
+            WidgetVisualMode.Compact => new(Net48Compatibility.Clamp(value.Width, CompactMinWidth, CompactMaxWidth), Net48Compatibility.Clamp(value.Width, CompactMinWidth, CompactMaxWidth) / CompactAspectRatio),
+            WidgetVisualMode.Detailed => new(DetailedWidth, Net48Compatibility.Clamp(value.Height, DetailedMinHeight, DetailedMaxHeight)),
+            WidgetVisualMode.Settings => new(DetailedWidth, Net48Compatibility.Clamp(value.Height, SettingsMinHeight, SettingsMaxHeight)),
             _ => throw new ArgumentOutOfRangeException(nameof(mode))
         };
     }
@@ -60,6 +60,11 @@ public static class WidgetSizePolicy
     // temporarily held by the previous WPF layout constraints.
     public static WidgetSize SelectModeSize(WidgetModeSizes slots, WidgetVisualMode destination) => Get(slots, destination);
 
+    public static double DetailedMaxHeightForContent(double contentHeight) =>
+        !IsFinitePositive(contentHeight)
+            ? DetailedMaxHeight
+            : Net48Compatibility.Clamp(Math.Ceiling(contentHeight), DetailedMinHeight, DetailedMaxHeight);
+
     public static WidgetModeSizes With(WidgetModeSizes slots, WidgetVisualMode mode, WidgetSize size)
     {
         var normalized = Normalize(mode, size);
@@ -72,5 +77,5 @@ public static class WidgetSizePolicy
         };
     }
 
-    private static bool IsFinitePositive(double value) => double.IsFinite(value) && value > 0;
+    private static bool IsFinitePositive(double value) => Net48Compatibility.IsFinite(value) && value > 0;
 }

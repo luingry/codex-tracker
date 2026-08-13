@@ -7,7 +7,7 @@ public enum ConnectionState { Loading, Live, Stale, SignedOut, Error }
 
 public sealed record QuotaWindow(string Id, string Label, double UsedPercent, DateTimeOffset? ResetsAt, int? WindowDurationMins, string? Detail = null)
 {
-    public double RemainingPercent => Math.Clamp(100 - UsedPercent, 0, 100);
+    public double RemainingPercent => Net48Compatibility.Clamp(100 - UsedPercent, 0, 100);
 }
 
 public sealed record RateLimitSnapshot(
@@ -70,7 +70,7 @@ public static class RateLimitParser
     private static bool IsSameWindow(QuotaWindow previous, QuotaWindow update, DateTimeOffset receivedAt) =>
         previous.ResetsAt is { } reset && reset > receivedAt &&
         previous.WindowDurationMins is > 0 &&
-        double.IsFinite(previous.UsedPercent) && double.IsFinite(update.UsedPercent) &&
+        Net48Compatibility.IsFinite(previous.UsedPercent) && Net48Compatibility.IsFinite(update.UsedPercent) &&
         update.UsedPercent >= previous.UsedPercent &&
         (update.ResetsAt is null || update.ResetsAt == reset) &&
         (update.WindowDurationMins is null || update.WindowDurationMins == previous.WindowDurationMins);
@@ -95,11 +95,11 @@ public static class RateLimitParser
         if (node.ValueKind != JsonValueKind.Object) return false;
         if (!TryGetNumber(node, "usedPercent", out var used)) return false;
         var duration = TryGetInt(node, "windowDurationMins");
-        var kind = id[(id.LastIndexOf(':') + 1)..];
+        var kind = id.Substring(id.LastIndexOf(':') + 1);
         var suffix = duration is >= 240 and <= 360 ? "5-hour limit" : duration >= 10000 ? "Weekly limit" : FormatWindow(duration);
         var label = parentName == "Codex" ? suffix : parentName + " - " + suffix;
-        if (!double.IsFinite(used)) return false;
-        window = new QuotaWindow(id, label, Math.Clamp(used, 0, 100), TryGetDate(node, "resetsAt"), duration, FindString(node, "reachedType"));
+        if (!Net48Compatibility.IsFinite(used)) return false;
+        window = new QuotaWindow(id, label, Net48Compatibility.Clamp(used, 0, 100), TryGetDate(node, "resetsAt"), duration, FindString(node, "reachedType"));
         return true;
     }
 

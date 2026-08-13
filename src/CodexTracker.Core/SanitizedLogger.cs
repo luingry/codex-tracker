@@ -7,10 +7,11 @@ public static class SanitizedLogger
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
-            if (File.Exists(LogPath) && new FileInfo(LogPath).Length > 512_000) File.Move(LogPath, LogPath + ".1", true);
+            if (File.Exists(LogPath) && new FileInfo(LogPath).Length > 512_000) { var archive = LogPath + ".1"; if (File.Exists(archive)) File.Delete(archive); File.Move(LogPath, archive); }
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            File.AppendAllText(LogPath, $"{DateTimeOffset.Now:O} {message.Replace(home, "%USERPROFILE%", StringComparison.OrdinalIgnoreCase).Replace(Environment.NewLine, " ")}\n");
+            File.AppendAllText(LogPath, $"{DateTimeOffset.Now:O} {ReplaceIgnoreCase(message, home, "%USERPROFILE%").Replace(Environment.NewLine, " ")}\n");
         }
         catch { }
     }
+    private static string ReplaceIgnoreCase(string value, string oldValue, string newValue) => System.Text.RegularExpressions.Regex.Replace(value, System.Text.RegularExpressions.Regex.Escape(oldValue), newValue.Replace("$", "$$"), System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 }

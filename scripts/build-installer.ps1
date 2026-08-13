@@ -7,12 +7,19 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $publishDir = Join-Path $repoRoot 'installer\publish'
 $installerScript = Join-Path $repoRoot 'installer\CodexTracker.iss'
+$versionPath = Join-Path $repoRoot 'VERSION'
+$appVersion = (Get-Content -LiteralPath $versionPath -Raw).Trim()
+if ([string]::IsNullOrWhiteSpace($appVersion) -or $appVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+    throw "VERSION must contain a simple SemVer value; found '$appVersion'."
+}
 if (-not $SkipTests) {
     & dotnet run --project (Join-Path $repoRoot 'tests\CodexTracker.Tests\CodexTracker.Tests.csproj')
     if ($LASTEXITCODE -ne 0) { throw 'Core tests failed; installer was not created.' }
 }
 
-& dotnet publish (Join-Path $repoRoot 'src\CodexTracker\CodexTracker.csproj') --configuration Release --runtime win-x64 --self-contained true --output $publishDir -p:PublishSingleFile=false -p:PublishReadyToRun=true
+# .NET Framework 4.8 is supplied by supported Windows 10/11; publish only the app and managed dependencies.
+if (Test-Path -LiteralPath $publishDir) { Remove-Item -LiteralPath $publishDir -Recurse -Force }
+& dotnet publish (Join-Path $repoRoot 'src\CodexTracker\CodexTracker.csproj') --configuration Release --output $publishDir
 if ($LASTEXITCODE -ne 0) { throw 'Application publish failed.' }
 
 function Find-InnoCompiler {
@@ -51,7 +58,7 @@ if ($null -eq $iscc) {
     if ($null -eq $iscc) { throw 'Inno Setup was installed but ISCC.exe was not found.' }
 }
 
-& $iscc "/O$(Join-Path $repoRoot 'artifacts')" $installerScript
+& $iscc "/DAppVersion=$appVersion" "/O$(Join-Path $repoRoot 'artifacts')" $installerScript
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
 
 Get-ChildItem -LiteralPath (Join-Path $repoRoot 'artifacts') -Filter 'CodexTracker-Setup-*.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1 FullName, Length, LastWriteTime

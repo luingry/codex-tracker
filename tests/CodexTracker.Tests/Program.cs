@@ -3,22 +3,62 @@ using System.Text.Json;
 using CodexTracker.Core;
 using CodexTracker;
 
+var trayOnlyExtendedStyle = TrayOnlyWindowPolicy.ToTrayOnlyExtendedStyle(TrayOnlyWindowPolicy.AppWindowExtendedStyle | 0x00000008L);
+Assert((trayOnlyExtendedStyle & TrayOnlyWindowPolicy.ToolWindowExtendedStyle) != 0 && (trayOnlyExtendedStyle & TrayOnlyWindowPolicy.AppWindowExtendedStyle) == 0 && (trayOnlyExtendedStyle & 0x00000008L) != 0, "tray-only policy adds WS_EX_TOOLWINDOW, removes WS_EX_APPWINDOW, and preserves unrelated extended styles");
+
+var compactGauge = CompactGaugeLayoutPolicy.ForWindow(new WidgetSize(62, 52));
+Assert(compactGauge == new CompactGaugeLayout(42, 38), "minimum compact layout keeps the circular background exactly 4 DIP smaller than the 42 DIP gauge");
+Assert(CompactGaugeLayoutPolicy.ForWindow(new WidgetSize(100, 100 / (62d / 52d))) == new CompactGaugeLayout(100 / (62d / 52d) - 10, 100 / (62d / 52d) - 14), "resized compact layout derives both vector circles from the final window height without Viewbox scaling");
+Assert(NearlyEqual(CompactGaugeLayoutPolicy.FontSizeForWindow(new(62, 52)), 15.18) && NearlyEqual(CompactGaugeLayoutPolicy.FontSizeForWindow(new(81, 0)), 15.18 * 81d / 62d) && NearlyEqual(CompactGaugeLayoutPolicy.FontSizeForWindow(new(100, 0)), 15.18 * 100d / 62d), "compact font uses the 15% larger 15.18 DIP base size and scales proportionally with the widget width");
+Assert(BackdropCompositionPolicy.ForMode(WidgetVisualMode.Compact) == new BackdropComposition(BackdropNonClientRendering.Disabled, BackdropCornerPreference.DoNotRound) && BackdropCompositionPolicy.ForMode(WidgetVisualMode.Detailed) == new BackdropComposition(BackdropNonClientRendering.Enabled, BackdropCornerPreference.Round) && BackdropCompositionPolicy.ForMode(WidgetVisualMode.Settings) == new BackdropComposition(BackdropNonClientRendering.Enabled, BackdropCornerPreference.Round), "backdrop composition disables non-client shadow composition only in compact mode");
+
+var dualMonitorWorkAreas = new[] { new WidgetScreenRect(0, 0, 1920, 1080), new WidgetScreenRect(1920, 0, 3840, 1080) };
+var secondarySavedBounds = new WidgetScreenRect(2877, 176, 2877 + 62, 176 + 52);
+Assert(WidgetPlacementPolicy.Restore(secondarySavedBounds, dualMonitorWorkAreas) == secondarySavedBounds, "saved compact widget position on a secondary monitor remains unchanged instead of being clamped to the primary work area");
+var leftMonitorWorkAreas = new[] { new WidgetScreenRect(-1920, 0, 0, 1080), new WidgetScreenRect(0, 0, 1920, 1080) };
+var leftSavedBounds = new WidgetScreenRect(-1500, 176, -1500 + 62, 176 + 52);
+Assert(WidgetPlacementPolicy.Restore(leftSavedBounds, leftMonitorWorkAreas) == leftSavedBounds, "saved widget position on a negative-coordinate monitor remains unchanged");
+var partiallyVisibleBounds = new WidgetScreenRect(1890, 176, 1890 + 62, 176 + 52);
+Assert(WidgetPlacementPolicy.Restore(partiallyVisibleBounds, dualMonitorWorkAreas) == partiallyVisibleBounds, "partially visible widget position is not unnecessarily moved");
+var removedMonitorBounds = new WidgetScreenRect(5000, 176, 5000 + 62, 176 + 52);
+Assert(WidgetPlacementPolicy.Restore(removedMonitorBounds, dualMonitorWorkAreas) == new WidgetScreenRect(3778, 176, 3840, 228), "offscreen widget falls back inside the nearest available work area");
+
+var rankingNow = DateTimeOffset.Now;
+var rankingCycleEnd = new DateTimeOffset(2026, 8, 16, 12, 0, 0, TimeSpan.Zero);
+var rankingCycleStart = rankingCycleEnd.AddMinutes(-10080);
+var rankingAnalytics = new UsageAnalytics(0, 99, 0, 0, 0, [new ModelUsage("month-model", 99, 0, true)], ModelTimeline:
+[
+    new(rankingNow.AddMinutes(-1), "day-model", 11, 0, false),
+    new(rankingCycleStart.AddMinutes(1), "cycle-model", 50, 0, true),
+    new(rankingCycleStart.AddMinutes(-1), "outside-cycle-model", 99, 0, true)
+]);
+var rankingViewModel = new MainViewModel();
+rankingViewModel.Apply(new RateLimitSnapshot([new("codex:primary", "Weekly limit", 16, rankingCycleEnd, 10080)], null, null, null, rankingNow), rankingAnalytics);
+Assert(rankingViewModel.Ranking.Single().Model == "month-model", "ranking preserves the monthly view as its default");
+rankingViewModel.IsRankingDay = true;
+Assert(rankingViewModel.Ranking.Single().Model == "day-model", "day ranking filters model usage to the current day");
+rankingViewModel.IsRankingWeek = true;
+Assert(rankingViewModel.Ranking.Any(row => row.Model == "cycle-model") && rankingViewModel.Ranking.All(row => row.Model != "outside-cycle-model"), "week ranking uses only the active Codex quota cycle, including usage before Monday and excluding usage outside the cycle");
+rankingViewModel.ApplyQuota(new RateLimitSnapshot([], null, null, null, rankingNow));
+Assert(rankingViewModel.Ranking.Count == 0, "week ranking is empty when the official active Codex quota cycle is unavailable");
+
 var compactSize = WidgetSizePolicy.Normalize(WidgetVisualMode.Compact, new WidgetSize(999, 1));
-Assert(compactSize.Width == 320 && Math.Abs(compactSize.Height * 62 - compactSize.Width * 52) < 0.001, "compact size clamps width and preserves the 62:52 ratio");
+Assert(compactSize.Width == 100 && Math.Abs(compactSize.Height * 62 - compactSize.Width * 52) < 0.001, "compact size clamps width at 100 and preserves the 62:52 ratio");
 Assert(WidgetSizePolicy.Normalize(WidgetVisualMode.Detailed, new WidgetSize(1, 999)) == new WidgetSize(300, 720), "detailed size keeps fixed width and clamps visible height");
 Assert(WidgetSizePolicy.Normalize(WidgetVisualMode.Detailed, new WidgetSize(300, 300)) == new WidgetSize(300, 300) && WidgetSizePolicy.Normalize(WidgetVisualMode.Detailed, new WidgetSize(300, 1)) == new WidgetSize(300, 260), "detailed preserves resized heights down to 260 and clamps below it");
 Assert(WidgetSizePolicy.Normalize(WidgetVisualMode.Settings, new WidgetSize(double.NaN, 0)) == WidgetSizePolicy.Default(WidgetVisualMode.Settings), "invalid settings size falls back to its safe default");
+Assert(WidgetSizePolicy.DetailedMaxHeightForContent(512.2) == 513 && WidgetSizePolicy.DetailedMaxHeightForContent(999) == WidgetSizePolicy.DetailedMaxHeight, "detailed maximum height follows rounded content height without exceeding the safety cap");
 var independentSlots = WidgetSizePolicy.NormalizeSlots(new WidgetModeSizes(new(124, 10), new(300, 480), new(300, 600)), false, new(62, 52));
-Assert(WidgetSizePolicy.Get(independentSlots, WidgetVisualMode.Compact) == new WidgetSize(124, 124 / (62d / 52d)) && WidgetSizePolicy.Get(independentSlots, WidgetVisualMode.Detailed) == new WidgetSize(300, 480) && WidgetSizePolicy.Get(independentSlots, WidgetVisualMode.Settings) == new WidgetSize(300, 600), "compact, detailed, and settings slots remain independent");
+Assert(WidgetSizePolicy.Get(independentSlots, WidgetVisualMode.Compact) == new WidgetSize(100, 100 / (62d / 52d)) && WidgetSizePolicy.Get(independentSlots, WidgetVisualMode.Detailed) == new WidgetSize(300, 480) && WidgetSizePolicy.Get(independentSlots, WidgetVisualMode.Settings) == new WidgetSize(300, 600), "persisted compact widths above 100 clamp without changing detailed and settings slots");
 var conceptualTransition = WidgetSizePolicy.With(independentSlots, WidgetVisualMode.Compact, new(200, 1));
-Assert(WidgetSizePolicy.Get(conceptualTransition, WidgetVisualMode.Compact) == new WidgetSize(200, 200 / (62d / 52d)) && WidgetSizePolicy.Get(conceptualTransition, WidgetVisualMode.Detailed) == new WidgetSize(300, 480) && WidgetSizePolicy.Get(conceptualTransition, WidgetVisualMode.Settings) == new WidgetSize(300, 600), "mode transition saves only its origin slot and restores other slots");
-var compactDetailedCompact = new WidgetModeSizes(new(124, 1), new(300, 533), new(300, 600));
+Assert(WidgetSizePolicy.Get(conceptualTransition, WidgetVisualMode.Compact) == new WidgetSize(100, 100 / (62d / 52d)) && WidgetSizePolicy.Get(independentSlots, WidgetVisualMode.Detailed) == new WidgetSize(300, 480) && WidgetSizePolicy.Get(independentSlots, WidgetVisualMode.Settings) == new WidgetSize(300, 600), "compact manual resize saves only a normalized compact slot");
+var compactDetailedCompact = new WidgetModeSizes(new(100, 1), new(300, 533), new(300, 600));
 var restoredCompact = WidgetSizePolicy.SelectModeSize(compactDetailedCompact, WidgetVisualMode.Compact);
 var restoredDetailed = WidgetSizePolicy.SelectModeSize(compactDetailedCompact, WidgetVisualMode.Detailed);
 var restoredCompactAgain = WidgetSizePolicy.SelectModeSize(compactDetailedCompact, WidgetVisualMode.Compact);
-Assert(restoredCompact == new WidgetSize(124, 124 / (62d / 52d)) && restoredDetailed == new WidgetSize(300, 533) && restoredCompactAgain == restoredCompact, "compact 124 survives repeated compact-detailed-compact selection without transient detailed dimensions");
+Assert(restoredCompact == new WidgetSize(100, 100 / (62d / 52d)) && restoredDetailed == new WidgetSize(300, 533) && restoredCompactAgain == restoredCompact, "compact cap survives repeated compact-detailed-compact selection without transient detailed dimensions");
 var legacyCompact = SettingsStore.Normalize(new AppSettings(Width: 124, Height: 99, IsExpanded: false));
-Assert(WidgetSizePolicy.Get(legacyCompact.ModeSizes!, WidgetVisualMode.Compact) == new WidgetSize(124, 124 / (62d / 52d)) && WidgetSizePolicy.Get(legacyCompact.ModeSizes!, WidgetVisualMode.Detailed) == WidgetSizePolicy.Default(WidgetVisualMode.Detailed), "legacy compact JSON migrates its dimensions only into compact");
+Assert(WidgetSizePolicy.Get(legacyCompact.ModeSizes!, WidgetVisualMode.Compact) == new WidgetSize(100, 100 / (62d / 52d)) && WidgetSizePolicy.Get(legacyCompact.ModeSizes!, WidgetVisualMode.Detailed) == WidgetSizePolicy.Default(WidgetVisualMode.Detailed), "legacy compact JSON migrates and clamps its dimensions only into compact");
 var legacyDetailed = SettingsStore.Normalize(new AppSettings(Width: 222, Height: 480, IsExpanded: true));
 Assert(WidgetSizePolicy.Get(legacyDetailed.ModeSizes!, WidgetVisualMode.Detailed) == new WidgetSize(300, 480) && WidgetSizePolicy.Get(legacyDetailed.ModeSizes!, WidgetVisualMode.Compact) == WidgetSizePolicy.Default(WidgetVisualMode.Compact), "legacy detailed JSON migrates its dimensions only into detailed");
 var missingSizes = SettingsStore.Normalize(new AppSettings(ModeSizes: null));
@@ -26,6 +66,21 @@ Assert(missingSizes.ModeSizes is not null && WidgetSizePolicy.Get(missingSizes.M
 var serializedSettings = legacyDetailed with { ModeSizes = new WidgetModeSizes(new(100, 1), new(300, 500), new(300, 650)) };
 var roundTrippedSettings = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(SettingsStore.Normalize(serializedSettings)))!;
 Assert(WidgetSizePolicy.Get(roundTrippedSettings.ModeSizes!, WidgetVisualMode.Compact) == new WidgetSize(100, 100 / (62d / 52d)) && WidgetSizePolicy.Get(roundTrippedSettings.ModeSizes!, WidgetVisualMode.Detailed) == new WidgetSize(300, 500) && WidgetSizePolicy.Get(roundTrippedSettings.ModeSizes!, WidgetVisualMode.Settings) == new WidgetSize(300, 650), "new JSON round trip retains all three size slots");
+
+var settingsTestDirectory = Path.Combine(Path.GetTempPath(), "CodexTracker.Tests", Guid.NewGuid().ToString("N"));
+var settingsTestPath = Path.Combine(settingsTestDirectory, "settings.json");
+try
+{
+    var persistedSettings = new AppSettings(Left: 412.5, Top: 237.25, IsExpanded: true, IsTopmost: false, CodexPath: @"C:\\Tools\\codex.exe", UsdBrl: 5.89m, Theme: "Escuro", CurrencyCode: "USD", ModeSizes: new WidgetModeSizes(new(90, 1), new(300, 480), new(300, 620)));
+    new SettingsStore(settingsTestPath).Save(persistedSettings);
+    var reloadedSettings = new SettingsStore(settingsTestPath).Load();
+    Assert(reloadedSettings.Left == 412.5 && reloadedSettings.Top == 237.25 && reloadedSettings.IsExpanded && !reloadedSettings.IsTopmost && reloadedSettings.CodexPath == @"C:\\Tools\\codex.exe" && reloadedSettings.UsdBrl == 5.89m && reloadedSettings.Theme == "Escuro" && reloadedSettings.CurrencyCode == "USD", "settings file round trip persists the final Left/Top position without replacing other preferences");
+}
+finally
+{
+    if (Directory.Exists(settingsTestDirectory)) Directory.Delete(settingsTestDirectory, true);
+}
+Assert(!Directory.Exists(settingsTestDirectory), "temporary settings round-trip directory is removed after the test");
 
 var resizeWorkArea = new ResizeWorkArea(-1920, 0, 1920, 1080);
 var compactStart = new ResizeBounds(-1500, 200, 124, 104);
@@ -112,11 +167,17 @@ Assert(CurrencyPresentation.FormatCost(.8m, 4.4m, "USD") == "US$ 0,80", "USD for
 var currencyViewModel = new MainViewModel();
 var currencyReset = DateTimeOffset.UtcNow.AddDays(1);
 var currencyTimelineAt = currencyReset.AddHours(-1);
-var currencyAnalytics = new UsageAnalytics(10, 20, 2m, 10m, 100, [], .5m, 2.5m, [new(DateOnly.FromDateTime(DateTime.Today), 10, .5m, 2.5m)], [new(currencyTimelineAt, 10, 1m)], 5m);
+var currencyAnalytics = new UsageAnalytics(10, 20, 2m, 10m, 100, [], .5m, 2.5m, [new(DateTime.Today, 10, .5m, 2.5m)], [new(currencyTimelineAt, 10, 1m)], 5m);
 currencyViewModel.Apply(new RateLimitSnapshot([new("codex:primary", "Weekly", 10, currencyReset, 10080)], null, null, null, DateTimeOffset.UtcNow), currencyAnalytics, "BRL");
 Assert(currencyViewModel.WeeklyCost == "R$ 5,00" && currencyViewModel.TodayCost == "R$ 2,50" && currencyViewModel.MonthCost == "R$ 10,00", "view model initially formats all retained costs in BRL");
 currencyViewModel.SetCurrency("USD");
 Assert(currencyViewModel.CurrencyCode == "USD" && currencyViewModel.WeeklyCost == "US$ 1,00" && currencyViewModel.TodayCost == "US$ 0,50" && currencyViewModel.MonthCost == "US$ 2,00", "currency change immediately reformats retained weekly, daily and monthly costs without analytics refresh");
+var forecastViewModel = new MainViewModel();
+forecastViewModel.ApplyQuota(new RateLimitSnapshot([new("codex:primary", "Weekly", 80, nowForecast.AddDays(6), 10080)], null, null, null, nowForecast));
+Assert(forecastViewModel.Reset.StartsWith("reinicia em ", StringComparison.Ordinal) && !forecastViewModel.Reset.Contains("restante esta semana", StringComparison.OrdinalIgnoreCase), "weekly reset keeps only the reset countdown label");
+Assert(forecastViewModel.IsExhaustionRisk && forecastViewModel.Forecast.StartsWith("Risco de esgotar antes do reset", StringComparison.Ordinal), "view model exposes the early exhaustion risk for conditional UI emphasis");
+forecastViewModel.ApplyQuota(new RateLimitSnapshot([new("codex:primary", "Weekly", 10, nowForecast.AddDays(3), 10080)], null, null, null, nowForecast));
+Assert(!forecastViewModel.IsExhaustionRisk, "forecast emphasis clears when quota should last until reset");
 Assert(TokenPresentation.Format(999) == "999", "small token counts remain legible");
 Assert(TokenPresentation.Format(1_000) == "1 mil", "one thousand tokens uses mil");
 Assert(TokenPresentation.Format(1_000_000) == "1 mi", "one million tokens uses mi");
@@ -166,7 +227,8 @@ File.WriteAllText(Path.Combine(analyticsRoot, "session.jsonl"), """
 {"timestamp":"2026-08-12T10:02:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":180,"cached_input_tokens":30,"output_tokens":0,"total_tokens":180}}}}
 malformed
 """);
-var analytics = new LocalUsageAnalyticsService().Read(5.5m, analyticsRoot);
+var analyticsNow = new DateTimeOffset(2026, 8, 12, 12, 0, 0, TimeSpan.Zero);
+var analytics = new LocalUsageAnalyticsService(() => analyticsNow).Read(5.5m, analyticsRoot);
 Assert(analytics.MonthTokens == 180, "cumulative token snapshots use deltas, never 430");
 Assert(analytics.TodayUsd == 0.0003825m && analytics.TodayBrl == 0.00210375m, "today cost uses the same priced token buckets and configured BRL rate as the month");
 var dailySeries = analytics.DailySeries ?? throw new InvalidOperationException("daily series missing");

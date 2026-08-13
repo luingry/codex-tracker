@@ -70,14 +70,14 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         {
             while (_process is { HasExited: false } && !cancellationToken.IsCancellationRequested)
             {
-                var line = await _process.StandardOutput.ReadLineAsync(cancellationToken);
-                if (string.IsNullOrWhiteSpace(line)) continue;
+                var line = await ReadLineAsync(_process.StandardOutput, cancellationToken);
+                if (line is null || string.IsNullOrWhiteSpace(line)) continue;
                 using var document = JsonDocument.Parse(line);
                 var message = document.RootElement;
                 if (message.TryGetProperty("id", out var idNode) && idNode.TryGetInt64(out var id))
                 {
                     TaskCompletionSource<JsonElement>? source;
-                    lock (_pending) { _pending.Remove(id, out source); }
+                    lock (_pending) { _pending.TryGetValue(id, out source); _pending.Remove(id); }
                     if (source is null) continue;
                     if (message.TryGetProperty("error", out var error)) source.TrySetException(new InvalidOperationException("Codex rejected the request: " + error.GetRawText()));
                     else if (message.TryGetProperty("result", out var result)) source.TrySetResult(result.Clone());
@@ -94,7 +94,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
     private async Task DrainErrorAsync(CancellationToken cancellationToken)
     {
-        try { while (_process is { HasExited: false } && !cancellationToken.IsCancellationRequested) _ = await _process.StandardError.ReadLineAsync(cancellationToken); }
+        try { while (_process is { HasExited: false } && !cancellationToken.IsCancellationRequested) _ = await ReadLineAsync(_process.StandardError, cancellationToken); }
         catch (OperationCanceledException) { }
     }
 
@@ -115,9 +115,34 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_lifetime is not null) await _lifetime.CancelAsync();
+        if (_lifetime is not null) _lifetime.Cancel();
         TerminatePending(new OperationCanceledException("Codex Tracker is closing."));
-        if (_process is { HasExited: false }) { try { _process.Kill(true); } catch { } }
+        if (_process is { HasExited: false }) TerminateProcessTree(_process);
         _process?.Dispose(); _lifetime?.Dispose(); _writeLock.Dispose();
+    }
+
+    private static async Task<string?> ReadLineAsync(StreamReader reader, CancellationToken cancellationToken)
+    {
+        var read = reader.ReadLineAsync();
+        var cancelled = Task.Delay(Timeout.Infinite, cancellationToken);
+        if (await Task.WhenAny(read, cancelled) != read) throw new OperationCanceledException(cancellationToken);
+        return await read;
+    }
+
+    // Process.Kill(entireProcessTree: true) is unavailable on .NET Framework.
+    // taskkill is part of supported Windows and retains the former tree-termination contract.
+    private static void TerminateProcessTree(Process process)
+    {
+        try
+        {
+            using (var taskkill = Process.Start(new ProcessStartInfo("taskkill.exe", "/PID " + process.Id + " /T /F") { UseShellExecute = false, CreateNoWindow = true }))
+            {
+                taskkill?.WaitForExit(5000);
+            }
+        }
+        catch
+        {
+            try { if (!process.HasExited) process.Kill(); } catch { }
+        }
     }
 }

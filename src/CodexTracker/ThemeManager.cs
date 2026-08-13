@@ -14,7 +14,9 @@ internal static class ThemeManager
         Set("Apricot", dark ? "#4C3B31" : "#F0DED0");
         Set("Lavender", dark ? "#37343D" : "#EAE8EF");
         Set("Accent", dark ? "#58C7A5" : "#0D8F6F");
+        Set("RiskWarning", dark ? "#FFD166" : "#B66A00");
         Set("GaugeTrack", dark ? "#46504C" : "#CCD5D1");
+        Set("DetailedSurface", dark ? "#FF202321" : "#FFF7F7F4");
         Set("GlassSurface", dark ? "#FF202321" : "#FFF7F7F4");
         Set("GlassLavender", dark ? "#FF2A2E2C" : "#FFEAE8EF");
         Set("SettingsSurface", dark ? "#FF191C1B" : "#FFF2F2EE");

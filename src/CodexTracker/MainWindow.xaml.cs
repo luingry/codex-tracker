@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private int _analyticsRunning;
     private int _refreshTick;
     private bool _dragCandidate;
+    private bool _nativeDragInProgress;
     private bool _manualResize;
     private bool _resizeGestureActive;
     private bool _suppressDoubleClickToggle;
@@ -38,13 +39,22 @@ public partial class MainWindow : Window
     private Rect _resizeStartBounds;
     private ResizeWorkArea _resizeWorkArea;
     private ResizeEdge _resizeEdge;
-    // The compact XAML reserves a 52 x 42 gauge surface inside the 62 x 52 window.
+    // The compact XAML reserves a 42 DIP gauge inside the 62 x 52 minimum window.
     private const double CompactAspectRatio = WidgetSizePolicy.CompactAspectRatio;
     private const double CompactMinWidth = WidgetSizePolicy.CompactMinWidth;
     private const double CompactMaxWidth = WidgetSizePolicy.CompactMaxWidth;
     private const double ResizeBorderThickness = 6d;
+    private const double DetailedVerticalMargin = 24d;
+    private double _detailedContentMaxHeight = WidgetSizePolicy.DetailedMaxHeight;
     private const int WmNcLButtonDown = 0x00A1;
+    private const int WmExitSizeMove = 0x0232;
     private const int HtCaption = 0x0002;
+    private const int GwlExStyle = -20;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint SwpFrameChanged = 0x0020;
 
     [Flags]
     private enum ResizeEdge { None = 0, Left = 1, Top = 2, Right = 4, Bottom = 8 }
@@ -67,8 +77,8 @@ public partial class MainWindow : Window
         _viewModel.SetCurrency(_settings.CurrencyCode);
         _viewModel.Expanded = _settings.IsExpanded;
         ApplyWindowModeSize();
-        Left = Math.Max(SystemParameters.WorkArea.Left, Math.Min(_settings.Left, SystemParameters.WorkArea.Right - Width));
-        Top = Math.Max(SystemParameters.WorkArea.Top, Math.Min(_settings.Top, SystemParameters.WorkArea.Bottom - Height));
+        Left = _settings.Left;
+        Top = _settings.Top;
         Loaded += (_, _) =>
         {
             _refreshTimer.Start();
@@ -150,7 +160,7 @@ public partial class MainWindow : Window
 
     private static System.Drawing.Icon CreateTrayIcon()
     {
-        if (Environment.ProcessPath is { } executable && System.Drawing.Icon.ExtractAssociatedIcon(executable) is { } applicationIcon)
+        if (RuntimePaths.ExecutablePath is { } executable && System.Drawing.Icon.ExtractAssociatedIcon(executable) is { } applicationIcon)
         {
             using (applicationIcon) return (System.Drawing.Icon)applicationIcon.Clone();
         }
@@ -241,13 +251,68 @@ public partial class MainWindow : Window
         ThemeManager.Apply(theme);
         ApplyBackdrop(theme);
     }
-    private void ApplyBackdrop(string theme) => Backdrop.Apply(this, string.Equals(theme, "Escuro", StringComparison.OrdinalIgnoreCase));
+    private void ApplyBackdrop(string theme)
+    {
+        ApplyWindowSurface();
+        Backdrop.Apply(this, string.Equals(theme, "Escuro", StringComparison.OrdinalIgnoreCase), CurrentVisualMode);
+    }
     private void CloseWindow(object sender, RoutedEventArgs e) => Hide();
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
+        var handle = new WindowInteropHelper(this).Handle;
+        HwndSource.FromHwnd(handle)?.AddHook(WindowProc);
+        RestoreWindowPosition(handle);
+        ApplyTrayOnlyWindowStyle();
         ApplyBackdrop(_settings.Theme);
     }
+
+    private static void RestoreWindowPosition(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero || !GetWindowRect(handle, out var currentBounds)) return;
+
+        var workAreas = Forms.Screen.AllScreens
+            .Select(screen => new WidgetScreenRect(screen.WorkingArea.Left, screen.WorkingArea.Top, screen.WorkingArea.Right, screen.WorkingArea.Bottom))
+            .ToArray();
+        var restored = WidgetPlacementPolicy.Restore(
+            new WidgetScreenRect(currentBounds.Left, currentBounds.Top, currentBounds.Right, currentBounds.Bottom), workAreas);
+        if (restored == new WidgetScreenRect(currentBounds.Left, currentBounds.Top, currentBounds.Right, currentBounds.Bottom)) return;
+
+        SetWindowPos(handle, IntPtr.Zero, restored.Left, restored.Top, 0, 0,
+            SwpNoSize | SwpNoZOrder | SwpNoActivate);
+    }
+
+    private IntPtr WindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (message == WmExitSizeMove && _nativeDragInProgress)
+        {
+            _nativeDragInProgress = false;
+            Save();
+        }
+
+        return IntPtr.Zero;
+    }
+
+    private void ApplyTrayOnlyWindowStyle()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero) return;
+
+        var extendedStyle = GetExtendedWindowStyle(handle).ToInt64();
+        var trayOnlyStyle = TrayOnlyWindowPolicy.ToTrayOnlyExtendedStyle(extendedStyle);
+        if (trayOnlyStyle == extendedStyle) return;
+
+        SetExtendedWindowStyle(handle, new IntPtr(trayOnlyStyle));
+        SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0,
+            SwpNoSize | SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
+    }
+    private void ApplyWindowSurface() => WindowSurface.Background = CurrentVisualMode switch
+    {
+        WidgetVisualMode.Compact => System.Windows.Media.Brushes.Transparent,
+        WidgetVisualMode.Detailed => (System.Windows.Media.Brush)FindResource("DetailedSurface"),
+        WidgetVisualMode.Settings => (System.Windows.Media.Brush)FindResource("SettingsSurface"),
+        _ => System.Windows.Media.Brushes.Transparent
+    };
 
     private void OnWindowPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -324,6 +389,7 @@ public partial class MainWindow : Window
         if (windowHandle == IntPtr.Zero) return;
 
         ReleaseCapture();
+        _nativeDragInProgress = true;
         SendMessage(windowHandle, WmNcLButtonDown, (IntPtr)HtCaption, IntPtr.Zero);
         e.Handled = true;
     }
@@ -344,11 +410,33 @@ public partial class MainWindow : Window
     private ResizeEdge GetResizeEdge(System.Windows.Point position)
     {
         var verticalOnly = _viewModel.Expanded || SettingsPanel.Visibility == Visibility.Visible;
+        if (!verticalOnly) return GetCompactResizeEdge(position);
+
         var edge = ResizeEdge.None;
-        if (!verticalOnly && position.X <= ResizeBorderThickness) edge |= ResizeEdge.Left;
-        if (!verticalOnly && position.X >= ActualWidth - ResizeBorderThickness) edge |= ResizeEdge.Right;
         if (position.Y <= ResizeBorderThickness) edge |= ResizeEdge.Top;
         if (position.Y >= ActualHeight - ResizeBorderThickness) edge |= ResizeEdge.Bottom;
+        return edge;
+    }
+
+    private ResizeEdge GetCompactResizeEdge(System.Windows.Point position)
+    {
+        var bounds = CompactQuotaGauge.TransformToAncestor(this)
+            .TransformBounds(new Rect(0, 0, CompactQuotaGauge.ActualWidth, CompactQuotaGauge.ActualHeight));
+        if (bounds.Width <= 0 || bounds.Height <= 0) return ResizeEdge.None;
+
+        var halfWidth = bounds.Width / 2d;
+        var halfHeight = bounds.Height / 2d;
+        var horizontal = (position.X - (bounds.Left + halfWidth)) / halfWidth;
+        var vertical = (position.Y - (bounds.Top + halfHeight)) / halfHeight;
+        var radius = Math.Sqrt(horizontal * horizontal + vertical * vertical);
+        if (radius < 1d - ResizeBorderThickness / Math.Min(halfWidth, halfHeight) || radius > 1.05d)
+            return ResizeEdge.None;
+
+        var edge = ResizeEdge.None;
+        if (horizontal <= -0.45d) edge |= ResizeEdge.Left;
+        if (horizontal >= 0.45d) edge |= ResizeEdge.Right;
+        if (vertical <= -0.45d) edge |= ResizeEdge.Top;
+        if (vertical >= 0.45d) edge |= ResizeEdge.Bottom;
         return edge;
     }
 
@@ -460,7 +548,7 @@ public partial class MainWindow : Window
             MinWidth = MaxWidth = WidgetSizePolicy.DetailedWidth;
             Width = WidgetSizePolicy.DetailedWidth;
             MinHeight = WidgetSizePolicy.DetailedMinHeight;
-            MaxHeight = WidgetSizePolicy.DetailedMaxHeight;
+            MaxHeight = _detailedContentMaxHeight;
             Height = size.Height;
         }
         else if (mode == WidgetVisualMode.Settings)
@@ -479,6 +567,19 @@ public partial class MainWindow : Window
             MaxHeight = CompactMaxWidth / CompactAspectRatio;
             SetCompactSize(size.Width);
         }
+        ApplyBackdrop(_settings.Theme);
+    }
+    private void DetailedContentLayoutUpdated(object? sender, EventArgs e)
+    {
+        if (CurrentVisualMode != WidgetVisualMode.Detailed) return;
+
+        var contentMaxHeight = WidgetSizePolicy.DetailedMaxHeightForContent(
+            DetailedContent.DesiredSize.Height + DetailedVerticalMargin);
+        if (Math.Abs(contentMaxHeight - _detailedContentMaxHeight) < .5d) return;
+
+        _detailedContentMaxHeight = contentMaxHeight;
+        MaxHeight = contentMaxHeight;
+        if (Height > contentMaxHeight) Height = contentMaxHeight;
     }
     private void SetCompactSize(double width)
     {
@@ -502,6 +603,20 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr hIcon);
     [DllImport("user32.dll")] private static extern bool ReleaseCapture();
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+    private static IntPtr GetExtendedWindowStyle(IntPtr hWnd) => IntPtr.Size == 8
+        ? GetWindowLongPtr(hWnd, GwlExStyle)
+        : new IntPtr(GetWindowLong(hWnd, GwlExStyle));
+    private static void SetExtendedWindowStyle(IntPtr hWnd, IntPtr style)
+    {
+        if (IntPtr.Size == 8) SetWindowLongPtr(hWnd, GwlExStyle, style);
+        else SetWindowLong(hWnd, GwlExStyle, style.ToInt32());
+    }
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)] private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int index);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)] private static extern int GetWindowLong(IntPtr hWnd, int index);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)] private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int index, IntPtr newLong);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)] private static extern int SetWindowLong(IntPtr hWnd, int index, int newLong);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
     private const uint MonitorDefaultToNearest = 2;
     [DllImport("user32.dll")] private static extern IntPtr MonitorFromRect(ref NativeRect rect, uint flags);
     [DllImport("user32.dll", CharSet = CharSet.Auto)] private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo monitorInfo);

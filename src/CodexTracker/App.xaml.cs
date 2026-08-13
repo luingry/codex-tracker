@@ -52,9 +52,12 @@ public partial class App : System.Windows.Application
 
     private static string GetSingleInstanceMutexName()
     {
-        var executablePath = System.IO.Path.GetFullPath(Environment.ProcessPath ?? AppContext.BaseDirectory).ToUpperInvariant();
-        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(executablePath));
-        return @"Local\CodexTracker." + Convert.ToHexString(hash.AsSpan(0, 12));
+        var executablePath = System.IO.Path.GetFullPath(CodexTracker.Core.RuntimePaths.ExecutablePath).ToUpperInvariant();
+        using (var algorithm = System.Security.Cryptography.SHA256.Create())
+        {
+            var hash = algorithm.ComputeHash(System.Text.Encoding.UTF8.GetBytes(executablePath));
+            return @"Local\CodexTracker." + BitConverter.ToString(hash, 0, 12).Replace("-", string.Empty);
+        }
     }
 
     private static string GetShutdownEventName() => GetSingleInstanceMutexName() + ".Shutdown";

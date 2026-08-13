@@ -103,7 +103,7 @@ public sealed class DailyUsageChart : FrameworkElement
             if (TryNumber(item, out var direct)) { result.Add(new(fallbackDay++, Math.Max(0, direct), 0, 0)); continue; }
             var type = item.GetType();
             var dayValue = type.GetProperty("Day")?.GetValue(item);
-            var day = dayValue is DateOnly date ? date.Day : fallbackDay;
+            var day = dayValue is DateTime date ? date.Day : fallbackDay;
             var tokenProperty = type.GetProperty("Tokens") ?? type.GetProperty("Value") ?? type.GetProperty("Usage");
             _ = TryNumber(tokenProperty?.GetValue(item), out var tokens);
             _ = TryDecimal(type.GetProperty("UsdCost")?.GetValue(item), out var usd);
@@ -131,7 +131,7 @@ public sealed class DailyUsageChart : FrameworkElement
         var formatted = lines.Select(line => CreateTooltipText(line, typeface)).ToArray();
         var boxWidth = Math.Max(68, formatted.Max(line => line.Width) + 14);
         var boxHeight = 49d;
-        var x = Math.Clamp(hit.Bounds.X + hit.Bounds.Width / 2 - boxWidth / 2, 0, Math.Max(0, ActualWidth - boxWidth));
+        var x = Net48Compatibility.Clamp(hit.Bounds.X + hit.Bounds.Width / 2 - boxWidth / 2, 0, Math.Max(0, ActualWidth - boxWidth));
         var y = 2d;
         var box = new Rect(x, y, boxWidth, boxHeight);
         context.DrawRoundedRectangle(TooltipSurface, null, box, 6, 6);

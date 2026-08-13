@@ -11,7 +11,9 @@
     <SolidColorBrush x:Key="Apricot" Color="#F7D6B9" />
     <SolidColorBrush x:Key="Lavender" Color="#DFD7F1" />
     <SolidColorBrush x:Key="Accent" Color="#0D8F6F" />
+    <SolidColorBrush x:Key="RiskWarning" Color="#B66A00" />
     <SolidColorBrush x:Key="GaugeTrack" Color="#CCD5D1" />
+    <SolidColorBrush x:Key="DetailedSurface" Color="#FFF7F7F4" />
     <SolidColorBrush x:Key="GlassSurface" Color="#FFF7F7F4" />
     <SolidColorBrush x:Key="GlassLavender" Color="#FFEAE8EF" />
     <SolidColorBrush x:Key="SettingsSurface" Color="#FFF2F2EE" />
@@ -19,6 +21,7 @@
     <SolidColorBrush x:Key="HoverSurface" Color="#FFDCE7E2" />
     <BooleanToVisibilityConverter x:Key="BooleanToVisibility" />
     <local:CompactVisibilityConverter x:Key="CompactVisibility" />
+    <local:CompactGaugeDiameterConverter x:Key="CompactGaugeDiameter" />
 
     <Style TargetType="Button">
       <Setter Property="Background" Value="Transparent" />

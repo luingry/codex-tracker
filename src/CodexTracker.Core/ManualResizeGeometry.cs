@@ -41,7 +41,7 @@ public static class ManualResizeGeometry
         var verticalDelta = (handle.HasFlag(ResizeHandle.Top) ? -delta.Y : delta.Y) * CompactAspectRatio;
         var requestedWidth = start.Width + (Math.Abs(horizontalDelta) >= Math.Abs(verticalDelta) ? horizontalDelta : verticalDelta);
         var maximumWidth = Math.Min(maxWidth, CompactMaximumWidth(start, handle, workArea));
-        var width = Math.Clamp(requestedWidth, minWidth, maximumWidth);
+        var width = Net48Compatibility.Clamp(requestedWidth, minWidth, maximumWidth);
         var height = width / CompactAspectRatio;
         var left = handle.HasFlag(ResizeHandle.Left) ? start.Right - width : start.Left;
         var top = handle.HasFlag(ResizeHandle.Top) ? start.Bottom - height : start.Top;
@@ -60,7 +60,7 @@ public static class ManualResizeGeometry
         var maximumHeight = handle.HasFlag(ResizeHandle.Top)
             ? Math.Min(maxHeight, start.Bottom - workArea.Top)
             : Math.Min(maxHeight, workArea.Bottom - start.Top);
-        var height = Math.Clamp(requestedHeight, minHeight, maximumHeight);
+        var height = Net48Compatibility.Clamp(requestedHeight, minHeight, maximumHeight);
         var top = handle.HasFlag(ResizeHandle.Top) ? start.Bottom - height : start.Top;
         return new ResizeBounds(start.Left, top, start.Width, height);
     }

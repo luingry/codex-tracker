@@ -8,7 +8,7 @@ public static class WeeklyForecastCalculator
     public static WeeklyForecast Calculate(QuotaWindow? window, DateTimeOffset asOf)
     {
         if (window?.ResetsAt is null || window.WindowDurationMins is not > 0 ||
-            !double.IsFinite(window.UsedPercent) || window.UsedPercent is <= 0 or > 100)
+            !Net48Compatibility.IsFinite(window.UsedPercent) || window.UsedPercent is <= 0 or > 100)
             return new(Insufficient, null, null);
 
         var duration = TimeSpan.FromMinutes(window.WindowDurationMins.Value);
@@ -22,7 +22,7 @@ public static class WeeklyForecastCalculator
 
         var fraction = elapsed.TotalSeconds / duration.TotalSeconds;
         var projected = window.UsedPercent / fraction;
-        if (!double.IsFinite(projected)) return new(Insufficient, null, null);
+        if (!Net48Compatibility.IsFinite(projected)) return new(Insufficient, null, null);
         if (window.UsedPercent >= 100) return new("Limite esgotado", projected, asOf);
         if (Math.Round(projected, 1, MidpointRounding.AwayFromZero) <= 100) return new("Deve durar até o reset", projected, null);
         var exhausts = start.AddSeconds(elapsed.TotalSeconds * (100 / window.UsedPercent));

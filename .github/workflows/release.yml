@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - VERSION
+      - CHANGELOG.md
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build installer
+        shell: pwsh
+        run: ./scripts/build-installer.ps1
+
+      - name: Read version and matching changelog section
+        id: release_metadata
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "VERSION must contain a simple SemVer value; found '$version'."
+          }
+
+          $lines = @(Get-Content -LiteralPath CHANGELOG.md)
+          $headerPattern = '^## \[' + [regex]::Escape($version) + '\](?:\s|$)'
+          $start = -1
+          for ($index = 0; $index -lt $lines.Count; $index++) {
+            if ($lines[$index] -match $headerPattern) {
+              $start = $index
+              break
+            }
+          }
+          if ($start -lt 0) {
+            throw "CHANGELOG.md does not contain a section for version $version."
+          }
+
+          $end = $lines.Count
+          for ($index = $start + 1; $index -lt $lines.Count; $index++) {
+            if ($lines[$index] -match '^## ') {
+              $end = $index
+              break
+            }
+          }
+
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          $lines[$start..($end - 1)] | Set-Content -LiteralPath $notesPath -Encoding utf8
+          $installerPath = Join-Path artifacts "CodexTracker-Setup-$version.exe"
+          if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) {
+            throw "Installer build did not produce $installerPath."
+          }
+
+          "version=$version" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+          "tag=v$version" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+          "notes_path=$notesPath" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+          "installer_path=$((Resolve-Path -LiteralPath $installerPath).Path)" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+
+      - name: Upload setup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodexTracker-Setup-${{ steps.release_metadata.outputs.version }}
+          path: ${{ steps.release_metadata.outputs.installer_path }}
+          if-no-files-found: error
+
+      - name: Create or update GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ steps.release_metadata.outputs.tag }}'
+          $installer = '${{ steps.release_metadata.outputs.installer_path }}'
+          $notes = '${{ steps.release_metadata.outputs.notes_path }}'
+          $title = 'Codex Tracker ${{ steps.release_metadata.outputs.version }}'
+
+          gh release view $tag --json id | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --title $title --notes-file $notes
+            if ($LASTEXITCODE -ne 0) { throw "Failed to update release $tag." }
+            gh release upload $tag $installer --clobber
+            if ($LASTEXITCODE -ne 0) { throw "Failed to upload the setup asset for $tag." }
+          }
+          else {
+            gh release create $tag $installer --title $title --notes-file $notes
+            if ($LASTEXITCODE -ne 0) { throw "Failed to create release $tag." }
+          }
+
+      - name: Remove older releases and their tags
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_TAG: ${{ steps.release_metadata.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $endpoint = "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+          $releasePages = gh api --paginate --slurp $endpoint | ConvertFrom-Json
+          $releases = @($releasePages | ForEach-Object { $_ })
+          $olderReleases = @($releases | Where-Object { $_.tag_name -ne $env:CURRENT_TAG })
+
+          foreach ($release in $olderReleases) {
+            gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to delete release $($release.tag_name)."
+            }
+
+            gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/tags/$($release.tag_name)"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to delete tag $($release.tag_name)."
+            }
+          }
