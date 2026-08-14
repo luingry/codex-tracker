@@ -66,16 +66,9 @@
                   <Border x:Name="AgentIndicatorSurface" Background="#2D2D2D" CornerRadius="10" ClipToBounds="True">
                     <Border.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Opacity=".30" Color="#151A18" /></Border.Effect>
                     <Grid>
-                      <Ellipse x:Name="AgentWorkGlow" Width="18" Height="18" Opacity=".10" Visibility="Collapsed" IsHitTestVisible="False">
-                        <Ellipse.Fill>
-                          <RadialGradientBrush Center="0.5,0.5" GradientOrigin="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
-                            <GradientStop Color="Transparent" Offset="0" />
-                            <GradientStop x:Name="AgentWorkGlowInnerEdge" Color="Transparent" Offset=".88" />
-                            <GradientStop Color="#FFFFFF" Offset="1" />
-                          </RadialGradientBrush>
-                        </Ellipse.Fill>
-                        <Ellipse.Effect><BlurEffect Radius="1.5" /></Ellipse.Effect>
-                      </Ellipse>
+                      <Path x:Name="AgentWorkSpinner" Width="18" Height="18" Data="M9,0 A9,9 0 0 1 14.29,1.72" Stretch="None" Stroke="#FFFFFF" StrokeThickness="1" Opacity=".50" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Visibility="Collapsed" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                        <Path.RenderTransform><RotateTransform x:Name="AgentWorkSpinnerRotation" Angle="0" /></Path.RenderTransform>
+                      </Path>
                       <TextBlock x:Name="AgentCount" Text="{Binding ActiveAgentCount}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="11.5" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                       <Path x:Name="AgentArrow" Width="9" Height="6" Data="M1,1L5,5L9,1" Stretch="Uniform" Stroke="White" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
                     </Grid>
@@ -91,16 +84,15 @@
                     <Setter TargetName="AgentArrow" Property="Data" Value="M1,5L5,1L9,5" />
                   </DataTrigger>
                   <DataTrigger Binding="{Binding IsWorkAnimationEnabled}" Value="True">
-                    <Setter TargetName="AgentWorkGlow" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="AgentWorkSpinner" Property="Visibility" Value="Visible" />
                     <DataTrigger.EnterActions>
-                      <BeginStoryboard x:Name="AgentWorkGlowStoryboard">
+                      <BeginStoryboard x:Name="AgentWorkSpinnerStoryboard">
                         <Storyboard RepeatBehavior="Forever">
-                          <DoubleAnimation Storyboard.TargetName="AgentWorkGlowInnerEdge" Storyboard.TargetProperty="Offset" From=".88" To=".58" Duration="0:0:1.00" AutoReverse="True" />
-                          <DoubleAnimation Storyboard.TargetName="AgentWorkGlow" Storyboard.TargetProperty="Opacity" From=".10" To=".34" Duration="0:0:1.00" AutoReverse="True" />
+                          <DoubleAnimation Storyboard.TargetName="AgentWorkSpinnerRotation" Storyboard.TargetProperty="Angle" From="0" To="-360" Duration="0:0:1.00" />
                         </Storyboard>
                       </BeginStoryboard>
                     </DataTrigger.EnterActions>
-                    <DataTrigger.ExitActions><StopStoryboard BeginStoryboardName="AgentWorkGlowStoryboard" /></DataTrigger.ExitActions>
+                    <DataTrigger.ExitActions><StopStoryboard BeginStoryboardName="AgentWorkSpinnerStoryboard" /></DataTrigger.ExitActions>
                   </DataTrigger>
                   <Trigger Property="IsPressed" Value="True"><Setter TargetName="AgentIndicatorSurface" Property="Opacity" Value=".68" /></Trigger>
                 </ControlTemplate.Triggers>

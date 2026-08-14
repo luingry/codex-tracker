@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.11.11] - 2026-08-14
+
+### Changed
+
+- The compact active-agent activity effect is now a crisp, counterclockwise 10-percent white spinner arc on the indicator edge, at 50-percent opacity with fixed 1-DIP stroke and no blur.
+
 ## [0.11.10] - 2026-08-14
 
 ### Fixed
