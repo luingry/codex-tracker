@@ -38,6 +38,7 @@ public partial class MainWindow : Window
     private int _agentRefreshRunning;
     private int _titleRefreshRunning;
     private int _refreshTick;
+    private UsageAnalytics? _lastLoadedAnalytics;
     private bool _dragCandidate;
     private bool _nativeDragInProgress;
     private bool _manualResize;
@@ -101,7 +102,7 @@ public partial class MainWindow : Window
             _agentTimer.Start();
             _ = LoadAsync();
             _ = RefreshAgentsAsync();
-            if (_viewModel.Expanded) _ = RefreshAnalyticsAsync();
+            _ = RefreshAnalyticsAsync();
         };
         Closing += OnClosing;
         SourceInitialized += OnSourceInitialized;
@@ -157,6 +158,8 @@ public partial class MainWindow : Window
                     _viewModel.ApplyQuota(snapshot);
                     if (pendingUsage is not null && _viewModel.Expanded)
                         _viewModel.Apply(snapshot, pendingUsage, _settings.CurrencyCode);
+                    else
+                        ApplyCachedAnalyticsIfDetailed(snapshot);
                 });
                 var weekly = snapshot.Windows.FirstOrDefault(x => x.Id == "codex:primary" && x.WindowDurationMins >= 10000);
                 SanitizedLogger.Write($"Quota snapshot summary: windows={snapshot.Windows.Count}, weekly={(weekly is null ? "missing" : weekly.UsedPercent.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture))}");
@@ -190,7 +193,7 @@ public partial class MainWindow : Window
         try
         {
             await _client.RefreshAsync(_shutdown.Token);
-            if (_viewModel.Expanded && Interlocked.Increment(ref _refreshTick) % 5 == 0) _ = RefreshAnalyticsAsync();
+            if (Interlocked.Increment(ref _refreshTick) % 5 == 0) _ = RefreshAnalyticsAsync();
         }
         catch (Exception exception) { _viewModel.Status = LocalizationManager.Text("StaleRetrying"); SanitizedLogger.Write("Refresh error: " + exception.GetType().Name); await LoadAsync(); }
     }
@@ -201,6 +204,7 @@ public partial class MainWindow : Window
         try
         {
             var usage = await _analytics.ReadAsync(_settings.UsdBrl);
+            _lastLoadedAnalytics = usage;
             var ready = _startupAnalytics.OnAnalyticsReady(usage, _viewModel.Expanded);
             if (ready is { } application)
                 await Dispatcher.InvokeAsync(() =>
@@ -214,6 +218,12 @@ public partial class MainWindow : Window
             SanitizedLogger.Write("Analytics refresh error: " + exception.GetType().Name);
         }
         finally { Volatile.Write(ref _analyticsRunning, 0); }
+    }
+
+    private void ApplyCachedAnalyticsIfDetailed(RateLimitSnapshot snapshot)
+    {
+        if (!_viewModel.Expanded || _lastLoadedAnalytics is not { } usage || usage.UsdBrl != _settings.UsdBrl) return;
+        _viewModel.Apply(snapshot, usage, _settings.CurrencyCode);
     }
 
     private async Task RefreshAgentsAsync()
@@ -400,7 +410,11 @@ public partial class MainWindow : Window
         ApplyWindowModeSize();
         if (!_viewModel.Expanded && _viewModel.IsAgentListOpen) RepositionAgentListPopup();
         Save();
-        if (_viewModel.Expanded) _ = RefreshAnalyticsAsync();
+        if (_viewModel.Expanded)
+        {
+            if (_client?.Snapshot is { } snapshot) ApplyCachedAnalyticsIfDetailed(snapshot);
+            _ = RefreshAnalyticsAsync();
+        }
     }
     private void Settings(object sender, RoutedEventArgs e)
     {
@@ -494,7 +508,11 @@ public partial class MainWindow : Window
         SettingsPanel.Visibility = Visibility.Collapsed;
         ApplyWindowModeSize();
         Save();
-        if (_viewModel.Expanded) _ = RefreshAnalyticsAsync();
+        if (_viewModel.Expanded)
+        {
+            if (_client?.Snapshot is { } snapshot) ApplyCachedAnalyticsIfDetailed(snapshot);
+            _ = RefreshAnalyticsAsync();
+        }
         _ = LoadAsync();
     }
     private void PreviewTheme(object sender, RoutedEventArgs e)

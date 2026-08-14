@@ -62,13 +62,19 @@
                   Click="ToggleAgentList" ToolTip="{DynamicResource Loc.AgentsWorkingTooltip}" AutomationProperties.Name="{DynamicResource Loc.ShowWorkingAgents}">
             <Button.Template>
               <ControlTemplate TargetType="Button">
-                <Border x:Name="AgentIndicatorSurface" Background="#2D2D2D" CornerRadius="10">
-                  <Border.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Opacity=".30" Color="#151A18" /></Border.Effect>
-                  <Grid>
-                    <TextBlock x:Name="AgentCount" Text="{Binding ActiveAgentCount}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="11.5" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    <Path x:Name="AgentArrow" Width="9" Height="6" Data="M1,1L5,5L9,1" Stretch="Uniform" Stroke="White" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
-                  </Grid>
-                </Border>
+                <Grid>
+                  <Border x:Name="AgentIndicatorSurface" Background="#2D2D2D" CornerRadius="10">
+                    <Border.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Opacity=".30" Color="#151A18" /></Border.Effect>
+                    <Grid>
+                      <TextBlock x:Name="AgentCount" Text="{Binding ActiveAgentCount}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="11.5" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      <Path x:Name="AgentArrow" Width="9" Height="6" Data="M1,1L5,5L9,1" Stretch="Uniform" Stroke="White" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
+                    </Grid>
+                  </Border>
+                  <Path x:Name="AgentWorkSpinner" Data="M10,1 A9,9 0 1 1 3.64,3.64" Stroke="#FFFFFF" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Opacity=".60" Visibility="Collapsed" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                    <Path.Effect><BlurEffect Radius="2" /></Path.Effect>
+                    <Path.RenderTransform><RotateTransform x:Name="AgentWorkSpinnerRotation" Angle="0" /></Path.RenderTransform>
+                  </Path>
+                </Grid>
                 <ControlTemplate.Triggers>
                   <Trigger Property="IsMouseOver" Value="True">
                     <Setter TargetName="AgentCount" Property="Visibility" Value="Collapsed" />
@@ -77,6 +83,17 @@
                   </Trigger>
                   <DataTrigger Binding="{Binding IsAgentListOpen}" Value="True">
                     <Setter TargetName="AgentArrow" Property="Data" Value="M1,5L5,1L9,5" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding IsWorkAnimationEnabled}" Value="True">
+                    <Setter TargetName="AgentWorkSpinner" Property="Visibility" Value="Visible" />
+                    <DataTrigger.EnterActions>
+                      <BeginStoryboard x:Name="AgentWorkSpinnerStoryboard">
+                        <Storyboard RepeatBehavior="Forever">
+                          <DoubleAnimation Storyboard.TargetName="AgentWorkSpinnerRotation" Storyboard.TargetProperty="Angle" To="-360" Duration="0:0:1.10" />
+                        </Storyboard>
+                      </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                    <DataTrigger.ExitActions><StopStoryboard BeginStoryboardName="AgentWorkSpinnerStoryboard" /></DataTrigger.ExitActions>
                   </DataTrigger>
                   <Trigger Property="IsPressed" Value="True"><Setter TargetName="AgentIndicatorSurface" Property="Opacity" Value=".68" /></Trigger>
                 </ControlTemplate.Triggers>

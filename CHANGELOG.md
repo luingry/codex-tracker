@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2] - 2026-08-14
+
+### Fixed
+
+- O histórico local passa a ser carregado em segundo plano também no widget compacto e a cada ciclo periódico de cinco minutos; ao abrir o modo detalhado, o último resultado já carregado é aplicado imediatamente contra a quota atual, sem esperar uma segunda leitura.
+- O contador compacto de agents agora recebe um arco branco com blur luminoso de 60% que gira no sentido invertido somente enquanto há trabalho e o Windows permite animações; com movimento reduzido, ele permanece oculto e a animação é interrompida com segurança.
+
 ## [0.11.1] - 2026-08-14
 
 ### Fixed
