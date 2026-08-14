@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.3] - 2026-08-14
+
+### Fixed
+
+- O wrapper da lista de agents não reserva mais padding vertical externo nem gaps entre itens; os mesmos 8 DIP superior e inferior agora pertencem à superfície interativa de cada linha, para que hover e ripple cubram todo o respiro.
+- O spinner do contador de agents foi reduzido para aproximadamente um quarto do arco anterior, com blur ampliado e opacidade visual de 42%, preservando o giro anti-horário e a duração.
+
 ## [0.11.2] - 2026-08-14
 
 ### Fixed
