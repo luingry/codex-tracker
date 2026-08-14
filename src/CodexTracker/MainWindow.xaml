@@ -103,11 +103,12 @@
           <Popup x:Name="AgentListPopup" Placement="Bottom" PlacementTarget="{Binding ElementName=AgentIndicatorButton}"
                  AllowsTransparency="True" StaysOpen="True" PopupAnimation="None" IsOpen="{Binding IsAgentListOpen}" HorizontalOffset="-149" VerticalOffset="-10" Opened="AgentListPopupOpened">
             <Border Padding="15" Background="Transparent">
-              <Border x:Name="AgentListWrapper" Width="288" MaxHeight="350" Padding="0" CornerRadius="12" Background="{DynamicResource DetailedSurface}" BorderThickness="0" RenderTransformOrigin="0.5,0">
+              <Border x:Name="AgentListWrapper" Width="288" MaxHeight="350" Background="Transparent" BorderThickness="0" RenderTransformOrigin="0.5,0">
                 <Border.RenderTransform><TransformGroup><ScaleTransform x:Name="AgentListWrapperScale" /><TranslateTransform x:Name="AgentListWrapperTranslate" /></TransformGroup></Border.RenderTransform>
                 <Border.Effect><DropShadowEffect BlurRadius="12" ShadowDepth="3" Opacity=".28" Color="#151A18" /></Border.Effect>
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                  <ItemsControl ItemsSource="{Binding ActiveAgents}">
+                <local:RoundedClipBorder x:Name="AgentListClipSurface" Padding="0" CornerRadius="12" Background="{DynamicResource DetailedSurface}" BorderThickness="0">
+                  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding ActiveAgents}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
                       <Button x:Name="AgentRow" Margin="0" Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
@@ -185,8 +186,9 @@
                       </DataTemplate.Triggers>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
-                  </ItemsControl>
-                </ScrollViewer>
+                    </ItemsControl>
+                  </ScrollViewer>
+                </local:RoundedClipBorder>
               </Border>
             </Border>
           </Popup>

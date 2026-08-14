@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.11.4] - 2026-08-14
+
+### Fixed
+
+- Hover e ripple das linhas de agents agora são recortados por uma geometria arredondada dinâmica no contorno interno da lista; a sombra continua em uma camada externa sem clip, preservando a elevação sem escapes nos cantos.
+
 ## [0.11.3] - 2026-08-14
 
 ### Fixed
