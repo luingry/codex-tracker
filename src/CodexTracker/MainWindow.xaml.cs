@@ -18,22 +18,31 @@ namespace CodexTracker;
 public partial class MainWindow : Window
 {
     private readonly SettingsStore _store = new();
-    private readonly MainViewModel _viewModel = new();
+    private readonly MainViewModel _viewModel;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly LocalUsageAnalyticsService _analytics = new();
+    private readonly AgentActivityService _agentActivity = new();
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(60) };
+    private readonly DispatcherTimer _agentTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly Dictionary<string, string> _threadTitles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> _threadTitleLookups = new(StringComparer.OrdinalIgnoreCase);
     private readonly bool _demo;
     private AppSettings _settings;
     private CodexAppServerClient? _client;
     private Forms.NotifyIcon? _tray;
+    private Forms.ContextMenuStrip? _trayMenu;
+    private System.Drawing.Icon? _trayIcon;
     private int _connecting;
     private int _analyticsRunning;
+    private int _agentRefreshRunning;
+    private int _titleRefreshRunning;
     private int _refreshTick;
     private bool _dragCandidate;
     private bool _nativeDragInProgress;
     private bool _manualResize;
     private bool _resizeGestureActive;
     private bool _suppressDoubleClickToggle;
+    private string _pendingAccentColor = AccentPalette.DefaultBaseHex;
     private System.Windows.Point _dragStart;
     private System.Windows.Point _resizeStartScreen;
     private Rect _resizeStartBounds;
@@ -43,10 +52,12 @@ public partial class MainWindow : Window
     private const double CompactAspectRatio = WidgetSizePolicy.CompactAspectRatio;
     private const double CompactMinWidth = WidgetSizePolicy.CompactMinWidth;
     private const double CompactMaxWidth = WidgetSizePolicy.CompactMaxWidth;
+    private const double CompactAgentIndicatorHeight = 19d;
     private const double ResizeBorderThickness = 6d;
     private const double DetailedVerticalMargin = 24d;
     private double _detailedContentMaxHeight = WidgetSizePolicy.DetailedMaxHeight;
     private const int WmNcLButtonDown = 0x00A1;
+    private const int WmMoving = 0x0216;
     private const int WmExitSizeMove = 0x0232;
     private const int HtCaption = 0x0002;
     private const int GwlExStyle = -20;
@@ -61,6 +72,9 @@ public partial class MainWindow : Window
 
     public MainWindow(bool demo = false)
     {
+        _settings = _store.Load();
+        LocalizationManager.Apply(_settings.LanguageCode);
+        _viewModel = new MainViewModel();
         InitializeComponent();
         AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(OnWindowPreviewMouseDown), true);
         AddHandler(Mouse.PreviewMouseMoveEvent, new System.Windows.Input.MouseEventHandler(OnWindowPreviewMouseMove), true);
@@ -70,24 +84,29 @@ public partial class MainWindow : Window
         Chrome.IsHitTestVisible = false;
         DataContext = _viewModel;
         _demo = demo;
-        _settings = _store.Load();
+        _pendingAccentColor = _settings.AccentColor;
         Topmost = _settings.IsTopmost;
-        ThemeManager.Apply(_settings.Theme);
+        ThemeManager.Apply(_settings.Theme, _settings.AccentColor);
         _viewModel.Topmost = Topmost;
         _viewModel.SetCurrency(_settings.CurrencyCode);
         _viewModel.Expanded = _settings.IsExpanded;
+        _viewModel.IsAgentListOpen = false;
         ApplyWindowModeSize();
         Left = _settings.Left;
         Top = _settings.Top;
         Loaded += (_, _) =>
         {
             _refreshTimer.Start();
+            _agentTimer.Start();
             _ = LoadAsync();
+            _ = RefreshAgentsAsync();
             if (_viewModel.Expanded) _ = RefreshAnalyticsAsync();
         };
         Closing += OnClosing;
         SourceInitialized += OnSourceInitialized;
+        LocationChanged += (_, _) => RepositionAgentListPopup();
         _refreshTimer.Tick += async (_, _) => await RefreshAsync();
+        _agentTimer.Tick += async (_, _) => await RefreshAgentsAsync();
         CreateTray();
     }
 
@@ -102,11 +121,15 @@ public partial class MainWindow : Window
         try
         {
             var executable = CodexExecutableDiscovery.Find(_settings.CodexPath);
-            if (executable is null) { _viewModel.Status = "Erro: Codex CLI não encontrado"; SanitizedLogger.Write("Discovery failed"); return; }
+            if (executable is null) { _viewModel.Status = LocalizationManager.Text("CodexNotFound"); SanitizedLogger.Write("Discovery failed"); return; }
             SanitizedLogger.Write("App-server starting: " + executable);
             if (_client is not null) await _client.DisposeAsync();
             _client = new CodexAppServerClient(executable);
-            _client.StatusChanged += status => Dispatcher.Invoke(() => _viewModel.Status = status.StartsWith("Connection interrupted") ? "Stale: reconectando" : status);
+            _client.StatusChanged += status => Dispatcher.Invoke(() => _viewModel.Status = status.StartsWith("Connection interrupted", StringComparison.Ordinal)
+                ? LocalizationManager.Text("StaleReconnecting")
+                : status == "Connecting to Codex" ? LocalizationManager.Text("ConnectingToCodex")
+                : status == "Live from Codex" ? LocalizationManager.Text("LiveData")
+                : status);
             _client.SnapshotUpdated += snapshot =>
             {
                 _ = Dispatcher.InvokeAsync(() => _viewModel.ApplyQuota(snapshot));
@@ -116,7 +139,7 @@ public partial class MainWindow : Window
             await _client.StartAsync(_shutdown.Token);
             SanitizedLogger.Write("App-server initialized and read");
         }
-        catch (Exception exception) { _viewModel.Status = "Erro de conexão"; SanitizedLogger.Write("Connect error: " + exception.GetType().Name); }
+        catch (Exception exception) { _viewModel.Status = LocalizationManager.Text("ConnectionError"); SanitizedLogger.Write("Connect error: " + exception.GetType().Name); }
         finally { Volatile.Write(ref _connecting, 0); }
     }
 
@@ -128,7 +151,7 @@ public partial class MainWindow : Window
             await _client.RefreshAsync(_shutdown.Token);
             if (_viewModel.Expanded && Interlocked.Increment(ref _refreshTick) % 5 == 0) _ = RefreshAnalyticsAsync();
         }
-        catch (Exception exception) { _viewModel.Status = "Stale: tentando reconectar"; SanitizedLogger.Write("Refresh error: " + exception.GetType().Name); await LoadAsync(); }
+        catch (Exception exception) { _viewModel.Status = LocalizationManager.Text("StaleRetrying"); SanitizedLogger.Write("Refresh error: " + exception.GetType().Name); await LoadAsync(); }
     }
 
     private async Task RefreshAnalyticsAsync()
@@ -147,18 +170,69 @@ public partial class MainWindow : Window
         finally { Volatile.Write(ref _analyticsRunning, 0); }
     }
 
-    private void CreateTray()
+    private async Task RefreshAgentsAsync()
     {
-        _tray = new Forms.NotifyIcon { Visible = true, Text = "Codex Tracker", Icon = CreateTrayIcon() };
-        var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Mostrar", null, (_, _) => { Show(); Activate(); });
-        menu.Items.Add("Alternar modo detalhado", null, (_, _) => Dispatcher.Invoke(() => ToggleDetailed(this, new RoutedEventArgs())));
-        menu.Items.Add("Atualizar", null, async (_, _) => await RefreshAsync());
-        menu.Items.Add("Sair", null, (_, _) => Close());
-        _tray.ContextMenuStrip = menu;
+        if (_demo || Interlocked.Exchange(ref _agentRefreshRunning, 1) == 1) return;
+        try
+        {
+            var titles = new Dictionary<string, string>(_threadTitles, StringComparer.OrdinalIgnoreCase);
+            var agents = await Task.Run(() => _agentActivity.Read(titles));
+            var previouslyActive = _viewModel.HasActiveAgents;
+            _viewModel.ApplyAgents(agents, DateTimeOffset.UtcNow, AgentListPopup.IsOpen);
+            if (previouslyActive != _viewModel.HasActiveAgents)
+            {
+                if (!_viewModel.HasActiveAgents) _viewModel.IsAgentListOpen = false;
+                else if (_settings.IsAgentListExpanded && !_viewModel.Expanded) _viewModel.IsAgentListOpen = true;
+                ApplyCompactAgentIndicatorSize();
+            }
+            if (AgentListPopup.IsOpen && _viewModel.ActiveAgents.Any(row => row.IsNew))
+                _ = Dispatcher.InvokeAsync(async () => { await Task.Delay(210); _viewModel.MarkNewAgentRowsStable(); });
+
+            var now = DateTimeOffset.UtcNow;
+            var missingTitles = agents.Select(agent => agent.ThreadId)
+                .Where(id => !_threadTitles.ContainsKey(id) &&
+                             (!_threadTitleLookups.TryGetValue(id, out var attemptedAt) || now - attemptedAt >= TimeSpan.FromMinutes(1)))
+                .ToArray();
+            if (missingTitles.Length > 0) _ = RefreshAgentTitlesAsync(missingTitles);
+        }
+        catch (Exception exception) { SanitizedLogger.Write("Agent activity refresh error: " + exception.GetType().Name); }
+        finally { Volatile.Write(ref _agentRefreshRunning, 0); }
     }
 
-    private static System.Drawing.Icon CreateTrayIcon()
+    private async Task RefreshAgentTitlesAsync(IReadOnlyList<string> threadIds)
+    {
+        if (_client is null || Interlocked.Exchange(ref _titleRefreshRunning, 1) == 1) return;
+        try
+        {
+            var attemptedAt = DateTimeOffset.UtcNow;
+            foreach (var threadId in threadIds) _threadTitleLookups[threadId] = attemptedAt;
+            var titles = await _client.ReadThreadTitlesAsync(threadIds, _shutdown.Token);
+            foreach (var title in titles) _threadTitles[title.Key] = title.Value;
+        }
+        catch (Exception exception) { SanitizedLogger.Write("Agent title refresh error: " + exception.GetType().Name); }
+        finally { Volatile.Write(ref _titleRefreshRunning, 0); }
+    }
+
+    private void CreateTray()
+    {
+        _tray ??= new Forms.NotifyIcon { Visible = true, Text = "Codex Tracker" };
+        var previousIcon = _trayIcon;
+        _trayIcon = CreateTrayIcon(_settings.AccentColor);
+        _tray.Icon = _trayIcon;
+        previousIcon?.Dispose();
+
+        var previousMenu = _trayMenu;
+        var menu = new Forms.ContextMenuStrip();
+        menu.Items.Add(LocalizationManager.Text("Show"), null, (_, _) => { Show(); Activate(); });
+        menu.Items.Add(LocalizationManager.Text("ToggleDetailedMode"), null, (_, _) => Dispatcher.Invoke(() => ToggleDetailed(this, new RoutedEventArgs())));
+        menu.Items.Add(LocalizationManager.Text("Refresh"), null, async (_, _) => await RefreshAsync());
+        menu.Items.Add(LocalizationManager.Text("Exit"), null, (_, _) => Close());
+        _tray.ContextMenuStrip = menu;
+        _trayMenu = menu;
+        previousMenu?.Dispose();
+    }
+
+    private static System.Drawing.Icon CreateTrayIcon(string? accentColor)
     {
         if (RuntimePaths.ExecutablePath is { } executable && System.Drawing.Icon.ExtractAssociatedIcon(executable) is { } applicationIcon)
         {
@@ -166,19 +240,120 @@ public partial class MainWindow : Window
         }
 
         using var bitmap = new Bitmap(32, 32);
+        var fallbackColor = ColorTranslator.FromHtml(AccentPalette.Normalize(accentColor));
         using (var graphics = Graphics.FromImage(bitmap))
-        using (var brush = new SolidBrush(Color.FromArgb(72, 191, 168))) graphics.FillEllipse(brush, 4, 4, 24, 24);
+        using (var brush = new SolidBrush(fallbackColor)) graphics.FillEllipse(brush, 4, 4, 24, 24);
         var handle = bitmap.GetHicon();
         try { return (System.Drawing.Icon)System.Drawing.Icon.FromHandle(handle).Clone(); }
         finally { DestroyIcon(handle); }
     }
 
     private void ToggleTopmost(object sender, RoutedEventArgs e) { Topmost = !Topmost; _viewModel.Topmost = Topmost; Save(); }
+    private void ToggleAgentList(object sender, RoutedEventArgs e)
+    {
+        var isOpen = !_viewModel.IsAgentListOpen;
+        _viewModel.IsAgentListOpen = isOpen;
+        _settings = _settings with { IsAgentListExpanded = isOpen };
+        Save();
+        RepositionAgentListPopup();
+    }
+
+    private void OpenAgentThread(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { CommandParameter: string threadId } || !CodexThreadDeepLink.TryCreate(threadId, out var deepLink) || deepLink is null)
+        {
+            SanitizedLogger.Write("Agent thread link rejected");
+            return;
+        }
+
+        try { Process.Start(new ProcessStartInfo(deepLink.AbsoluteUri) { UseShellExecute = true }); }
+        catch (Exception exception) { SanitizedLogger.Write("Agent thread link launch failed: " + exception.GetType().Name); }
+    }
+
+    private void AgentRowMouseEnter(object sender, System.Windows.Input.MouseEventArgs e) => AnimateAgentRowHover(sender as System.Windows.Controls.Button, true);
+
+    private void AgentRowMouseLeave(object sender, System.Windows.Input.MouseEventArgs e) => AnimateAgentRowHover(sender as System.Windows.Controls.Button, false);
+
+    private static void AnimateAgentRowHover(System.Windows.Controls.Button? row, bool isHovered)
+    {
+        if (row?.Template.FindName("AgentRowHover", row) is not Border hover) return;
+
+        const double targetOpacity = .09;
+        if (!SystemParameters.ClientAreaAnimation)
+        {
+            hover.BeginAnimation(OpacityProperty, null);
+            hover.Opacity = isHovered ? targetOpacity : 0;
+            return;
+        }
+
+        hover.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(isHovered ? targetOpacity : 0, TimeSpan.FromMilliseconds(400))
+        {
+            EasingFunction = CreateEaseOut()
+        });
+    }
+
+    private void AgentRowPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!SystemParameters.ClientAreaAnimation || sender is not System.Windows.Controls.Button row ||
+            row.Template.FindName("AgentRowSurface", row) is not Border surface ||
+            row.Template.FindName("AgentRowRipple", row) is not System.Windows.Shapes.Ellipse ripple ||
+            row.Template.FindName("AgentRowRippleScale", row) is not System.Windows.Media.ScaleTransform rippleScale) return;
+
+        var origin = e.GetPosition(surface);
+        var furthestHorizontal = Math.Max(origin.X, Math.Max(0, surface.ActualWidth - origin.X));
+        var furthestVertical = Math.Max(origin.Y, Math.Max(0, surface.ActualHeight - origin.Y));
+        var scale = Math.Max(1d, Math.Sqrt(furthestHorizontal * furthestHorizontal + furthestVertical * furthestVertical) + 1d);
+        Canvas.SetLeft(ripple, origin.X - 1d);
+        Canvas.SetTop(ripple, origin.Y - 1d);
+
+        ripple.BeginAnimation(OpacityProperty, null);
+        rippleScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, null);
+        rippleScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleYProperty, null);
+        ripple.Opacity = .30;
+        rippleScale.ScaleX = rippleScale.ScaleY = 0;
+
+        var duration = TimeSpan.FromMilliseconds(600);
+        ripple.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, duration));
+        rippleScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, new System.Windows.Media.Animation.DoubleAnimation(scale, duration) { EasingFunction = CreateEaseOut() });
+        rippleScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleYProperty, new System.Windows.Media.Animation.DoubleAnimation(scale, duration) { EasingFunction = CreateEaseOut() });
+    }
+
+    private void AgentListPopupOpened(object sender, EventArgs e)
+    {
+        RepositionAgentListPopup();
+        if (!SystemParameters.ClientAreaAnimation) return;
+        AgentListWrapper.Opacity = 0;
+        AgentListWrapperScale.ScaleX = AgentListWrapperScale.ScaleY = .96;
+        AgentListWrapperTranslate.Y = 4;
+        var duration = TimeSpan.FromMilliseconds(200);
+        AgentListWrapper.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(1, duration) { EasingFunction = CreateEaseOut() });
+        AgentListWrapperScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, new System.Windows.Media.Animation.DoubleAnimation(1, duration) { EasingFunction = CreateEaseOut() });
+        AgentListWrapperScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleYProperty, new System.Windows.Media.Animation.DoubleAnimation(1, duration) { EasingFunction = CreateEaseOut() });
+        AgentListWrapperTranslate.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, new System.Windows.Media.Animation.DoubleAnimation(0, duration) { EasingFunction = CreateEaseOut() });
+    }
+
+    private static System.Windows.Media.Animation.CubicEase CreateEaseOut() => new() { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut };
+
+    private void RepositionAgentListPopup()
+    {
+        if (!AgentListPopup.IsOpen) return;
+
+        // Popup has no public reposition API on the target WPF runtime. Changing an
+        // offset invokes its internal reposition path; restore it immediately so the
+        // separate popup HWND follows native dragging without a visible displacement.
+        var horizontalOffset = AgentListPopup.HorizontalOffset;
+        AgentListPopup.HorizontalOffset = horizontalOffset + 0.01d;
+        AgentListPopup.HorizontalOffset = horizontalOffset;
+    }
+
     private void ToggleDetailed(object sender, RoutedEventArgs e)
     {
         CaptureCurrentModeSize();
         _viewModel.Expanded = !_viewModel.Expanded;
+        if (_viewModel.Expanded) _viewModel.IsAgentListOpen = false;
+        else if (_settings.IsAgentListExpanded && _viewModel.HasActiveAgents) _viewModel.IsAgentListOpen = true;
         ApplyWindowModeSize();
+        if (!_viewModel.Expanded && _viewModel.IsAgentListOpen) RepositionAgentListPopup();
         Save();
         if (_viewModel.Expanded) _ = RefreshAnalyticsAsync();
     }
@@ -188,7 +363,11 @@ public partial class MainWindow : Window
         {
             CaptureCurrentModeSize();
             SettingsPanel.Visibility = Visibility.Collapsed;
-            ThemeManager.Apply(_settings.Theme);
+            _pendingAccentColor = _settings.AccentColor;
+            LocalizationManager.Apply(_settings.LanguageCode);
+            _viewModel.RefreshLocalization();
+            CreateTray();
+            ThemeManager.Apply(_settings.Theme, _settings.AccentColor);
             ApplyBackdrop(_settings.Theme);
             ApplyWindowModeSize();
             Save();
@@ -199,6 +378,9 @@ public partial class MainWindow : Window
         DetailedBox.IsChecked = _viewModel.Expanded;
         TopmostBox.IsChecked = Topmost;
         ThemeToggle.IsChecked = _settings.Theme == "Escuro";
+        LanguageBox.SelectedIndex = LocalizationManager.NormalizeLanguage(_settings.LanguageCode) == "en-US" ? 1 : 0;
+        _pendingAccentColor = _settings.AccentColor;
+        UpdateAccentPreview();
         CurrencyBox.SelectedIndex = SettingsStore.NormalizeCurrency(_settings.CurrencyCode) == "USD" ? 1 : 0;
         UpdateCurrencyRateVisibility();
         RateBox.Text = _settings.UsdBrl.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -209,6 +391,37 @@ public partial class MainWindow : Window
     }
     private void CurrencyChanged(object sender, SelectionChangedEventArgs e) => UpdateCurrencyRateVisibility();
     private void UpdateCurrencyRateVisibility() => RatePanel.Visibility = CurrencyBox.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+    private void PreviewLanguage(object sender, SelectionChangedEventArgs e)
+    {
+        if (LanguageBox.SelectedItem is not ComboBoxItem item) return;
+        LocalizationManager.Apply(item.Tag as string);
+        _viewModel.RefreshLocalization();
+        CreateTray();
+        DailyChart.InvalidateVisual();
+    }
+    private void ChooseAccentColor(object sender, RoutedEventArgs e)
+    {
+        var current = ColorTranslator.FromHtml(AccentPalette.Normalize(_pendingAccentColor));
+        using var dialog = new Forms.ColorDialog
+        {
+            AllowFullOpen = true,
+            AnyColor = true,
+            FullOpen = true,
+            SolidColorOnly = true,
+            Color = current
+        };
+        if (dialog.ShowDialog() != Forms.DialogResult.OK) return;
+        _pendingAccentColor = $"#{dialog.Color.R:X2}{dialog.Color.G:X2}{dialog.Color.B:X2}";
+        UpdateAccentPreview();
+        PreviewTheme(sender, e);
+    }
+    private void UpdateAccentPreview()
+    {
+        var normalized = AccentPalette.Normalize(_pendingAccentColor);
+        AccentColorValue.Text = normalized;
+        AccentColorSwatch.Fill = new System.Windows.Media.SolidColorBrush(
+            (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(normalized));
+    }
     private void Browse(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog(); if (dialog.ShowDialog() == true) PathBox.Text = dialog.FileName; }
     private void AutoDetect(object sender, RoutedEventArgs e) => PathBox.Text = CodexExecutableDiscovery.Find(null) ?? "";
     private void OpenLog(object sender, RoutedEventArgs e) { Directory.CreateDirectory(Path.GetDirectoryName(SanitizedLogger.LogPath)!); Process.Start(new ProcessStartInfo("notepad.exe", SanitizedLogger.LogPath) { UseShellExecute = true }); }
@@ -222,10 +435,10 @@ public partial class MainWindow : Window
             await probe.StartAsync(timeout.Token);
             var weekly = probe.Snapshot?.Windows.FirstOrDefault(x => x.Id == "codex:primary" && x.WindowDurationMins >= 10000);
             _viewModel.Status = weekly is null
-                ? "Conectado - quota semanal indisponível"
-                : $"Conectado - quota semanal restante {QuotaPresentation.FormatWeeklyRemaining(weekly)}";
+                ? LocalizationManager.Text("ConnectedWeeklyUnavailable")
+                : LocalizationManager.Format("ConnectedWeeklyRemaining", QuotaPresentation.FormatWeeklyRemaining(weekly));
         }
-        catch (Exception exception) { _viewModel.Status = "Teste falhou"; SanitizedLogger.Write("Path test error: " + exception.GetType().Name); }
+        catch (Exception exception) { _viewModel.Status = LocalizationManager.Text("TestFailed"); SanitizedLogger.Write("Path test error: " + exception.GetType().Name); }
     }
     private void ApplySettings(object sender, RoutedEventArgs e)
     {
@@ -233,10 +446,14 @@ public partial class MainWindow : Window
         decimal.TryParse(RateBox.Text.Replace(',', '.'), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var rate);
         var theme = ThemeToggle.IsChecked == true ? "Escuro" : "Claro";
         var currency = SettingsStore.NormalizeCurrency((CurrencyBox.SelectedItem as ComboBoxItem)?.Tag as string);
-        _settings = _settings with { CodexPath = string.IsNullOrWhiteSpace(PathBox.Text) ? null : PathBox.Text, UsdBrl = rate > 0 ? rate : 5.5m, Theme = theme, CurrencyCode = currency };
-        ThemeManager.Apply(theme);
+        var language = LocalizationManager.NormalizeLanguage((LanguageBox.SelectedItem as ComboBoxItem)?.Tag as string);
+        _settings = _settings with { CodexPath = string.IsNullOrWhiteSpace(PathBox.Text) ? null : PathBox.Text, UsdBrl = rate > 0 ? rate : 5.5m, Theme = theme, CurrencyCode = currency, AccentColor = AccentPalette.Normalize(_pendingAccentColor), LanguageCode = language };
+        LocalizationManager.Apply(language);
+        ThemeManager.Apply(theme, _settings.AccentColor);
+        CreateTray();
         ApplyBackdrop(theme);
         _viewModel.SetCurrency(currency);
+        _viewModel.RefreshLocalization();
         _viewModel.Expanded = DetailedBox.IsChecked == true;
         Topmost = TopmostBox.IsChecked == true;
         SettingsPanel.Visibility = Visibility.Collapsed;
@@ -248,7 +465,7 @@ public partial class MainWindow : Window
     private void PreviewTheme(object sender, RoutedEventArgs e)
     {
         var theme = ThemeToggle.IsChecked == true ? "Escuro" : "Claro";
-        ThemeManager.Apply(theme);
+        ThemeManager.Apply(theme, _pendingAccentColor);
         ApplyBackdrop(theme);
     }
     private void ApplyBackdrop(string theme)
@@ -284,6 +501,9 @@ public partial class MainWindow : Window
 
     private IntPtr WindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (message == WmMoving && _nativeDragInProgress)
+            RepositionAgentListPopup();
+
         if (message == WmExitSizeMove && _nativeDragInProgress)
         {
             _nativeDragInProgress = false;
@@ -472,7 +692,7 @@ public partial class MainWindow : Window
 
         var compactBounds = ManualResizeGeometry.ResizeCompact(start, delta, handle, _resizeWorkArea, CompactMinWidth, CompactMaxWidth);
         Left = compactBounds.Left;
-        Top = compactBounds.Top;
+        Top = compactBounds.Top - (_viewModel.HasActiveAgents && handle.HasFlag(ResizeHandle.Top) ? CompactAgentIndicatorHeight : 0d);
         SetCompactSize(compactBounds.Width);
     }
 
@@ -563,8 +783,8 @@ public partial class MainWindow : Window
         {
             MinWidth = CompactMinWidth;
             MaxWidth = CompactMaxWidth;
-            MinHeight = CompactMinWidth / CompactAspectRatio;
-            MaxHeight = CompactMaxWidth / CompactAspectRatio;
+            MinHeight = CompactMinWidth / CompactAspectRatio + ActiveCompactExtraHeight;
+            MaxHeight = CompactMaxWidth / CompactAspectRatio + ActiveCompactExtraHeight;
             SetCompactSize(size.Width);
         }
         ApplyBackdrop(_settings.Theme);
@@ -584,7 +804,15 @@ public partial class MainWindow : Window
     private void SetCompactSize(double width)
     {
         Width = width;
-        Height = width / CompactAspectRatio;
+        Height = width / CompactAspectRatio + ActiveCompactExtraHeight;
+    }
+    private double ActiveCompactExtraHeight => _viewModel.HasActiveAgents ? CompactAgentIndicatorHeight : 0d;
+    private void ApplyCompactAgentIndicatorSize()
+    {
+        if (CurrentVisualMode != WidgetVisualMode.Compact) return;
+        MinHeight = CompactMinWidth / CompactAspectRatio + ActiveCompactExtraHeight;
+        MaxHeight = CompactMaxWidth / CompactAspectRatio + ActiveCompactExtraHeight;
+        SetCompactSize(Width);
     }
     private WidgetVisualMode CurrentVisualMode => SettingsPanel.Visibility == Visibility.Visible
         ? WidgetVisualMode.Settings
@@ -599,7 +827,17 @@ public partial class MainWindow : Window
         _settings = _settings with { Left = Left, Top = Top, IsExpanded = _viewModel.Expanded, IsTopmost = Topmost };
         _store.Save(_settings);
     }
-    private void OnClosing(object? sender, CancelEventArgs e) { _refreshTimer.Stop(); _shutdown.Cancel(); _client?.DisposeAsync().AsTask().GetAwaiter().GetResult(); _tray?.Dispose(); Save(); }
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        _refreshTimer.Stop();
+        _agentTimer.Stop();
+        _shutdown.Cancel();
+        _client?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _tray?.Dispose();
+        _trayMenu?.Dispose();
+        _trayIcon?.Dispose();
+        Save();
+    }
     [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr hIcon);
     [DllImport("user32.dll")] private static extern bool ReleaseCapture();
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);

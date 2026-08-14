@@ -169,3 +169,45 @@
 - **Causa:** a seção `[Files]` do Inno Setup copia os arquivos novos, mas não remove arquivos que deixaram de fazer parte do publish.
 - **Solução:** `[InstallDelete]` remove somente o conteúdo de `{app}` antes de copiar o novo payload. `CloseApplications` continua encerrando apenas `CodexTracker.exe`, e `%APPDATA%\CodexTracker` não é tocado.
 - **Prevenção:** toda migração que reduz ou renomeia o payload deve testar upgrade sobre a versão anterior e medir contagem/tamanho do diretório instalado, além do tamanho do setup.
+
+## Popup de agentes travava na tela durante arraste do widget
+
+- **Sintoma:** o popup/lista de agentes abertos permanecia parado na tela quando o widget era arrastado, não acompanhando a posição da janela.
+- **Causa:** o `Popup` do WPF usa HWND separado; mover a janela proprietária não acionava o `Reposition` interno no `PlacementTarget` apenas com `InvalidateArrange`/`UpdateLayout`.
+- **Solução:** em `LocationChanged` (e/ou `WM_MOVING`), variar `HorizontalOffset` em `+0.01` DIP e restaurar imediatamente, forçando `OnOffsetChanged`/`Reposition` sem fechar o popup nem deslocá-lo perceptivelmente.
+- **Prevenção:** para popups que precisam seguir janelas nativas sem moldura, validar movimento real do popup durante arraste e usar uma propriedade de posicionamento que force reposicionamento; build/layout local isolado não prova comportamento de ancoragem dinâmica.
+
+## Lista de agentes fechava fora do widget e perdia a seta de hover
+
+- **Sintoma:** a lista aberta fechava ao clicar fora do widget e o indicador fechado podia continuar mostrando apenas o número, sem a seta para baixo no hover.
+- **Causa:** `Popup.StaysOpen=False` delegava o fechamento ao mecanismo global de clique do WPF; o estado da seta dependia de uma ligação `Tag` ao `IsOpen` de um `Popup`, atravessando o namescope separado do popup e deixando o template sem um estado visual confiável.
+- **Solução:** a preferência persistida `IsAgentListExpanded` é independente do estado físico do popup, que só abre com agents ativos. `StaysOpen=True` mantém a lista até o clique explícito no indicador; o template lê `IsAgentListOpen` diretamente do view model. Linhas existentes são preservadas entre atualizações e apenas linhas novas recebem animação de entrada.
+- **Prevenção:** não use um `Popup` como fonte de estado visual para templates fora do seu namescope. Separe preferência persistida, estado físico condicionado aos dados e estado visual do controle; cubra o round-trip e a detecção de itens novos com testes determinísticos.
+
+## Novo agente reabria a lista sobre o modo detalhado
+
+- **Sintoma:** depois de entrar no modo detalhado com a lista fechada, a chegada do primeiro agent podia abrir o popup por cima da janela.
+- **Causa:** `ToggleDetailed` fechava o estado físico corretamente, mas `RefreshAgentsAsync` restaurava a preferência persistida quando a atividade passava de zero para ativa sem verificar o modo visual atual.
+- **Solução:** o caminho de refresh só pode restaurar a lista quando `Expanded` é falso; a preferência continua preservada para reabertura ao voltar ao compacto.
+- **Prevenção:** toda atribuição que abre um popup exclusivo do compacto deve carregar a condição do modo no mesmo ramo. Um teste estrutural cobre o callback assíncrono de atualização, não apenas o handler que troca o modo.
+
+## Glow de trabalho aparecia nas barras do ranking
+
+- **Sintoma:** durante trabalho ativo, cada barra de modelo no ranking recebia o mesmo sweep luminoso destinado ao percentual semanal.
+- **Causa:** o template implícito global de `ProgressBar` continha o `WorkGlow` e reagia ao estado de trabalho herdado, atingindo toda instância do controle.
+- **Solução:** o template global de ranking voltou a ser estático; a animação permanece implementada somente em `CircularQuotaGauge`, usado pelo percentual semanal compacto e detalhado.
+- **Prevenção:** efeitos semânticos específicos de uma métrica não devem viver em estilos implícitos globais. Cubra a ausência do trigger no template de `ProgressBar` e a presença do estado de trabalho no gauge semanal.
+
+## Preview de idioma podia acumular handles da tray
+
+- **Sintoma:** alternar idioma repetidamente nas configurações poderia aumentar continuamente a contagem de handles GDI e menus do processo.
+- **Causa:** a atualização recriava `NotifyIcon`, `Icon` e `ContextMenuStrip`, mas `NotifyIcon.Dispose()` não assume a propriedade nem descarta explicitamente os dois últimos no .NET Framework.
+- **Solução:** uma única instância de `NotifyIcon` é preservada; ícone e menu novos são atribuídos antes que os anteriores sejam descartados, e os recursos finais também são liberados no fechamento.
+- **Prevenção:** trate objetos nativos atribuídos a componentes WinForms como recursos com ownership explícito. Testes estruturais cobrem a troca e o descarte em preview repetido e no shutdown.
+
+## Chevron de hover do indicador de agentes não aparecia após o ajuste de estado aberto
+
+- **Sintoma:** o indicador mostrava apenas o número em hover, especialmente com a lista aberta.
+- **Causa:** dois `MultiDataTrigger`s misturavam `IsMouseOver` e `IsAgentListOpen`; a troca essencial de visibilidade ficou acoplada ao estado da lista em vez de depender somente do hover do botão.
+- **Solução:** um `Trigger` direto de `IsMouseOver` agora oculta o número e mostra o chevron; um `DataTrigger` independente altera apenas o traço para cima quando a lista está aberta. As linhas também passaram a usar overlays sem hit-test, com hover de 400 ms e ripple de 600 ms que não bloqueiam o deep link.
+- **Prevenção:** mantenha a visibilidade de affordances de hover em um trigger único do controle; estados de dados devem ajustar somente a aparência variante. Cubra o template com teste estrutural que exija o trigger direto e rejeite `MultiDataTrigger` nessa superfície.

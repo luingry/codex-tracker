@@ -125,9 +125,9 @@ public sealed class DailyUsageChart : FrameworkElement
 
     private void DrawTooltip(DrawingContext context, BarHit hit, Typeface typeface)
     {
-        var tokenText = TokenPresentation.Format((long)Math.Round(hit.Point.Tokens));
-        var costText = CurrencyPresentation.FormatCost(hit.Point.UsdCost, hit.Point.BrlCost, CurrencyCode);
-        var lines = new[] { $"Dia {hit.Point.Day}", tokenText, costText };
+        var tokenText = TokenPresentation.Format((long)Math.Round(hit.Point.Tokens), LocalizationManager.CurrentLanguageCode);
+        var costText = CurrencyPresentation.FormatCost(hit.Point.UsdCost, hit.Point.BrlCost, CurrencyCode, LocalizationManager.CurrentLanguageCode);
+        var lines = new[] { LocalizationManager.Format("DayNumber", hit.Point.Day), tokenText, costText };
         var formatted = lines.Select(line => CreateTooltipText(line, typeface)).ToArray();
         var boxWidth = Math.Max(68, formatted.Max(line => line.Width) + 14);
         var boxHeight = 49d;

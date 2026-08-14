@@ -11,6 +11,8 @@ public sealed class CompactGaugeDiameterConverter : IValueConverter
         var dimension = value is double actualDimension ? actualDimension : 0d;
         if (string.Equals(parameter?.ToString(), "FontSize", StringComparison.OrdinalIgnoreCase))
             return CompactGaugeLayoutPolicy.FontSizeForWindow(new WidgetSize(dimension, 0d));
+        if (string.Equals(parameter?.ToString(), "WindowHeight", StringComparison.OrdinalIgnoreCase))
+            return dimension / WidgetSizePolicy.CompactAspectRatio;
 
         var layout = CompactGaugeLayoutPolicy.ForWindow(new WidgetSize(0d, dimension));
         return string.Equals(parameter?.ToString(), "Background", StringComparison.OrdinalIgnoreCase)

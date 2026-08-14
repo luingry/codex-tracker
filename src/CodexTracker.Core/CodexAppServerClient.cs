@@ -42,6 +42,23 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         ApplySnapshot(RateLimitParser.Parse(result, DateTimeOffset.UtcNow), false);
     }
 
+    public async Task<IReadOnlyDictionary<string, string>> ReadThreadTitlesAsync(IEnumerable<string> threadIds, CancellationToken cancellationToken)
+    {
+        var titles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var threadId in threadIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var result = await RequestAsync("thread/read", new { threadId, includeTurns = false }, cancellationToken);
+                if (!result.TryGetProperty("thread", out var thread) || thread.ValueKind != JsonValueKind.Object) continue;
+                if (thread.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(name.GetString()))
+                    titles[threadId] = name.GetString()!;
+            }
+            catch (InvalidOperationException) { }
+        }
+        return titles;
+    }
+
     private async Task<JsonElement> RequestAsync(string method, object? parameters, CancellationToken cancellationToken)
     {
         var id = Interlocked.Increment(ref _nextId);

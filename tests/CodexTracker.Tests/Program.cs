@@ -12,6 +12,19 @@ Assert(CompactGaugeLayoutPolicy.ForWindow(new WidgetSize(100, 100 / (62d / 52d))
 Assert(NearlyEqual(CompactGaugeLayoutPolicy.FontSizeForWindow(new(62, 52)), 15.18) && NearlyEqual(CompactGaugeLayoutPolicy.FontSizeForWindow(new(81, 0)), 15.18 * 81d / 62d) && NearlyEqual(CompactGaugeLayoutPolicy.FontSizeForWindow(new(100, 0)), 15.18 * 100d / 62d), "compact font uses the 15% larger 15.18 DIP base size and scales proportionally with the widget width");
 Assert(BackdropCompositionPolicy.ForMode(WidgetVisualMode.Compact) == new BackdropComposition(BackdropNonClientRendering.Disabled, BackdropCornerPreference.DoNotRound) && BackdropCompositionPolicy.ForMode(WidgetVisualMode.Detailed) == new BackdropComposition(BackdropNonClientRendering.Enabled, BackdropCornerPreference.Round) && BackdropCompositionPolicy.ForMode(WidgetVisualMode.Settings) == new BackdropComposition(BackdropNonClientRendering.Enabled, BackdropCornerPreference.Round), "backdrop composition disables non-client shadow composition only in compact mode");
 
+var lightAccent = AccentPalette.Create("#FFB000", false);
+var darkAccent = AccentPalette.Create("#FFB000", true);
+Assert(lightAccent.BaseHex == "#FFB000" && darkAccent.BaseHex == "#FFB000", "accent palette preserves the user's canonical seed color across themes");
+Assert(AccentPalette.ContrastRatio(lightAccent.AccentHex, "#F7F7F4") >= 4.5 && AccentPalette.ContrastRatio(darkAccent.AccentHex, "#202321") >= 4.5, "derived accent text remains readable on light and dark primary surfaces");
+Assert(lightAccent.SoftHex != lightAccent.AccentHex && lightAccent.HoverHex != lightAccent.AccentHex && lightAccent.GlowHex != lightAccent.AccentHex, "a single accent seed derives distinct soft, hover and glow tonal roles");
+Assert(AccentPalette.Normalize("invalid") == AccentPalette.DefaultBaseHex && AccentPalette.Normalize("0d8f6f") == "#0D8F6F", "invalid accent settings fall back safely while valid hex colors normalize canonically");
+
+LocalizationManager.Apply("en-US");
+Assert(LocalizationManager.CurrentLanguageCode == "en-US" && LocalizationManager.Text("Settings") == "Settings" && LocalizationManager.TranslateKnown("Trabalhando") == "Working" && LocalizationManager.TranslateKnown("Conversa Codex") == "Codex conversation", "en-US localization translates static and known runtime agent text");
+Assert(TokenPresentation.Format(1_234_567, "en-US") == "1.23 M" && CurrencyPresentation.FormatCost(12.5m, 0m, "USD", "en-US") == "US$ 12.50" && ResetCountdown.Format(new DateTimeOffset(2026, 8, 15, 14, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero), "en-US") == "resets in 1d 2h" && WeeklyForecastCalculator.FormatProjectedPercent(99.5, "en-US") == "99.5%", "en-US localization formats tokens, currency, reset countdown and forecast percentages with English conventions");
+LocalizationManager.Apply("unsupported");
+Assert(LocalizationManager.CurrentLanguageCode == "pt-BR" && LocalizationManager.Text("Settings") == "Configurações", "unsupported languages safely normalize to pt-BR");
+
 var dualMonitorWorkAreas = new[] { new WidgetScreenRect(0, 0, 1920, 1080), new WidgetScreenRect(1920, 0, 3840, 1080) };
 var secondarySavedBounds = new WidgetScreenRect(2877, 176, 2877 + 62, 176 + 52);
 Assert(WidgetPlacementPolicy.Restore(secondarySavedBounds, dualMonitorWorkAreas) == secondarySavedBounds, "saved compact widget position on a secondary monitor remains unchanged instead of being clamped to the primary work area");
@@ -71,16 +84,68 @@ var settingsTestDirectory = Path.Combine(Path.GetTempPath(), "CodexTracker.Tests
 var settingsTestPath = Path.Combine(settingsTestDirectory, "settings.json");
 try
 {
-    var persistedSettings = new AppSettings(Left: 412.5, Top: 237.25, IsExpanded: true, IsTopmost: false, CodexPath: @"C:\\Tools\\codex.exe", UsdBrl: 5.89m, Theme: "Escuro", CurrencyCode: "USD", ModeSizes: new WidgetModeSizes(new(90, 1), new(300, 480), new(300, 620)));
+    var persistedSettings = new AppSettings(Left: 412.5, Top: 237.25, IsExpanded: true, IsTopmost: false, CodexPath: @"C:\\Tools\\codex.exe", UsdBrl: 5.89m, Theme: "Escuro", CurrencyCode: "USD", ModeSizes: new WidgetModeSizes(new(90, 1), new(300, 480), new(300, 620)), IsAgentListExpanded: true, AccentColor: "#FFB000", LanguageCode: "en-US");
     new SettingsStore(settingsTestPath).Save(persistedSettings);
     var reloadedSettings = new SettingsStore(settingsTestPath).Load();
-    Assert(reloadedSettings.Left == 412.5 && reloadedSettings.Top == 237.25 && reloadedSettings.IsExpanded && !reloadedSettings.IsTopmost && reloadedSettings.CodexPath == @"C:\\Tools\\codex.exe" && reloadedSettings.UsdBrl == 5.89m && reloadedSettings.Theme == "Escuro" && reloadedSettings.CurrencyCode == "USD", "settings file round trip persists the final Left/Top position without replacing other preferences");
+    Assert(reloadedSettings.Left == 412.5 && reloadedSettings.Top == 237.25 && reloadedSettings.IsExpanded && !reloadedSettings.IsTopmost && reloadedSettings.CodexPath == @"C:\\Tools\\codex.exe" && reloadedSettings.UsdBrl == 5.89m && reloadedSettings.Theme == "Escuro" && reloadedSettings.CurrencyCode == "USD" && reloadedSettings.IsAgentListExpanded && reloadedSettings.AccentColor == "#FFB000" && reloadedSettings.LanguageCode == "en-US", "settings file round trip persists agent-list expansion, accent color and language without replacing other preferences");
 }
 finally
 {
     if (Directory.Exists(settingsTestDirectory)) Directory.Delete(settingsTestDirectory, true);
 }
 Assert(!Directory.Exists(settingsTestDirectory), "temporary settings round-trip directory is removed after the test");
+Assert(SettingsStore.Normalize(new AppSettings(AccentColor: "not-a-color")).AccentColor == AccentPalette.DefaultBaseHex, "invalid persisted accent colors migrate to the safe default");
+Assert(SettingsStore.Normalize(new AppSettings(LanguageCode: "fr-FR")).LanguageCode == "pt-BR", "unsupported persisted languages migrate to pt-BR");
+
+var agentRowsViewModel = new MainViewModel();
+Assert(CodexThreadDeepLink.TryCreate("018f18cc-9ffc-7bb3-9a48-7a3df5372adc", out var validThreadLink) && validThreadLink!.AbsoluteUri == "codex://threads/018f18cc-9ffc-7bb3-9a48-7a3df5372adc", "thread deep links accept a canonical UUID and target exactly its Codex thread");
+Assert(!CodexThreadDeepLink.TryCreate("codex://threads/018f18cc-9ffc-7bb3-9a48-7a3df5372adc", out _) && !CodexThreadDeepLink.TryCreate("not-a-uuid", out _) && !CodexThreadDeepLink.TryCreate(null, out _), "thread deep links reject non-UUID input before shell execution");
+var mainWindowXaml = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "MainWindow.xaml"));
+var indicatorStart = mainWindowXaml.IndexOf("x:Name=\"AgentIndicatorButton\"", StringComparison.Ordinal);
+var indicatorEnd = mainWindowXaml.IndexOf("<Popup x:Name=\"AgentListPopup\"", indicatorStart, StringComparison.Ordinal);
+var indicatorTemplate = indicatorStart >= 0 && indicatorEnd > indicatorStart ? mainWindowXaml.Substring(indicatorStart, indicatorEnd - indicatorStart) : string.Empty;
+Assert(indicatorTemplate.Contains("<Trigger Property=\"IsMouseOver\" Value=\"True\">", StringComparison.Ordinal) && indicatorTemplate.Contains("TargetName=\"AgentCount\" Property=\"Visibility\" Value=\"Collapsed\"", StringComparison.Ordinal) && indicatorTemplate.Contains("TargetName=\"AgentArrow\" Property=\"Visibility\" Value=\"Visible\"", StringComparison.Ordinal) && !indicatorTemplate.Contains("<MultiDataTrigger>", StringComparison.Ordinal), "agent indicator hover has one direct IsMouseOver trigger that swaps the count for the chevron independently of open state");
+var agentListStart = mainWindowXaml.IndexOf("<Popup x:Name=\"AgentListPopup\"", StringComparison.Ordinal);
+var agentListEnd = mainWindowXaml.IndexOf("</Popup>", agentListStart, StringComparison.Ordinal);
+var agentListTemplate = agentListStart >= 0 && agentListEnd > agentListStart ? mainWindowXaml.Substring(agentListStart, agentListEnd - agentListStart) : string.Empty;
+Assert(agentListTemplate.Contains("x:Name=\"AgentListWrapper\" Width=\"288\" MaxHeight=\"350\" Padding=\"0,8\"", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"AgentRow\" Margin=\"0,2\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Border Margin=\"{Binding Indent}\" Padding=\"15,6\">", StringComparison.Ordinal), "agent row hover and ripple span the full wrapper width while content keeps vertical breathing room and hierarchy indentation");
+Assert(mainWindowXaml.Contains("x:Name=\"AccentColorButton\" Click=\"ChooseAccentColor\"", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"AccentColorSwatch\"", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"AccentColorValue\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Color=\"{DynamicResource AccentGlow}\"", StringComparison.Ordinal), "settings expose an accessible accent color picker and the agent ripple glow follows the derived palette");
+Assert(mainWindowXaml.Contains("x:Name=\"LanguageBox\" SelectionChanged=\"PreviewLanguage\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Tag=\"pt-BR\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Tag=\"en-US\"", StringComparison.Ordinal) && mainWindowXaml.Contains("{DynamicResource Loc.Settings}", StringComparison.Ordinal), "settings expose pt-BR/en-US selection and static UI strings use dynamic localization resources");
+var localizedKeys = System.Text.RegularExpressions.Regex.Matches(mainWindowXaml, @"\{DynamicResource Loc\.([A-Za-z0-9]+)\}").Cast<System.Text.RegularExpressions.Match>().Select(match => match.Groups[1].Value).Distinct().ToArray();
+LocalizationManager.Apply("pt-BR");
+Assert(localizedKeys.All(LocalizationManager.HasTextKey), "every XAML localization key exists in both language catalogs");
+LocalizationManager.Apply("en-US");
+Assert(localizedKeys.All(key => !string.IsNullOrWhiteSpace(LocalizationManager.Text(key))), "every XAML localization key resolves to non-empty en-US text");
+LocalizationManager.Apply("pt-BR");
+var appXaml = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "App.xaml"));
+var progressStyleStart = appXaml.IndexOf("<Style TargetType=\"ProgressBar\">", StringComparison.Ordinal);
+var progressStyleEnd = appXaml.IndexOf("</Style>", progressStyleStart, StringComparison.Ordinal);
+var progressStyle = progressStyleStart >= 0 && progressStyleEnd > progressStyleStart ? appXaml.Substring(progressStyleStart, progressStyleEnd - progressStyleStart) : string.Empty;
+Assert(!progressStyle.Contains("WorkGlow", StringComparison.Ordinal) && !progressStyle.Contains("IsWorkAnimationEnabled", StringComparison.Ordinal) && mainWindowXaml.Contains("IsWorking=\"{Binding IsWorkAnimationEnabled}\"", StringComparison.Ordinal), "ranking progress bars stay static while the weekly circular quota gauges retain their dedicated work glow");
+var reasoningGlowStart = mainWindowXaml.IndexOf("x:Name=\"ReasoningGlow\"", StringComparison.Ordinal);
+var reasoningGlowEnd = mainWindowXaml.IndexOf("</DataTemplate>", reasoningGlowStart, StringComparison.Ordinal);
+var reasoningGlowTemplate = reasoningGlowStart >= 0 && reasoningGlowEnd > reasoningGlowStart ? mainWindowXaml.Substring(reasoningGlowStart, reasoningGlowEnd - reasoningGlowStart) : string.Empty;
+Assert(reasoningGlowTemplate.Contains("<LinearGradientBrush MappingMode=\"Absolute\" StartPoint=\"0,0.5\" EndPoint=\"64,0.5\">", StringComparison.Ordinal) && reasoningGlowTemplate.Contains("<LinearGradientBrush.Transform><TranslateTransform x:Name=\"ReasoningGlowTransform\" X=\"-64\" /></LinearGradientBrush.Transform>", StringComparison.Ordinal) && !reasoningGlowTemplate.Contains("LinearGradientBrush.RelativeTransform", StringComparison.Ordinal) && reasoningGlowTemplate.Contains("KeyTime=\"0:0:0\" Value=\"-64\"", StringComparison.Ordinal) && reasoningGlowTemplate.Contains("KeyTime=\"0:0:1.30\" Value=\"268\"", StringComparison.Ordinal) && reasoningGlowTemplate.Contains("KeyTime=\"0:0:3.30\" Value=\"268\"", StringComparison.Ordinal) && reasoningGlowTemplate.Contains("<DataTrigger Binding=\"{Binding IsWorkAnimationEnabled}\" Value=\"True\">", StringComparison.Ordinal) && reasoningGlowTemplate.Contains("<StopStoryboard BeginStoryboardName=\"ReasoningGlowStoryboard\" />", StringComparison.Ordinal), "reasoning glow uses a fixed 64-DIP absolute band, a 1.30-second left-to-right sweep, two-second hold, and the work-animation/reduced-motion trigger");
+var mainWindowCode = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "MainWindow.xaml.cs"));
+Assert(mainWindowCode.Contains("CreateTrayIcon(_settings.AccentColor)", StringComparison.Ordinal) && mainWindowCode.Contains("ColorTranslator.FromHtml(AccentPalette.Normalize(accentColor))", StringComparison.Ordinal) && mainWindowCode.Contains("CreateTray();", StringComparison.Ordinal), "tray fallback and recreated localized menu follow the persisted accent instead of retaining a fixed green");
+Assert(mainWindowCode.Contains("previousIcon?.Dispose();", StringComparison.Ordinal) && mainWindowCode.Contains("previousMenu?.Dispose();", StringComparison.Ordinal) && mainWindowCode.Contains("_trayMenu?.Dispose();", StringComparison.Ordinal) && mainWindowCode.Contains("_trayIcon?.Dispose();", StringComparison.Ordinal), "repeated language previews replace and deterministically dispose tray icon and menu native resources");
+Assert(mainWindowCode.Contains("LocalizationManager.Apply(_settings.LanguageCode);", StringComparison.Ordinal) && mainWindowCode.Contains("LanguageCode = language", StringComparison.Ordinal) && mainWindowCode.Contains("private void PreviewLanguage", StringComparison.Ordinal), "language preview, cancel restoration and apply persistence are wired through the settings lifecycle");
+var refreshAgentsStart = mainWindowCode.IndexOf("private async Task RefreshAgentsAsync", StringComparison.Ordinal);
+var refreshAgentsEnd = mainWindowCode.IndexOf("private void ToggleTopmost", refreshAgentsStart, StringComparison.Ordinal);
+var refreshAgentsCode = refreshAgentsStart >= 0 && refreshAgentsEnd > refreshAgentsStart ? mainWindowCode.Substring(refreshAgentsStart, refreshAgentsEnd - refreshAgentsStart) : string.Empty;
+Assert(refreshAgentsCode.Contains("else if (_settings.IsAgentListExpanded && !_viewModel.Expanded) _viewModel.IsAgentListOpen = true;", StringComparison.Ordinal), "agent refresh never opens the list while detailed mode is active");
+var toggleDetailedStart = mainWindowCode.IndexOf("private void ToggleDetailed", StringComparison.Ordinal);
+var toggleDetailedEnd = mainWindowCode.IndexOf("private void Settings", toggleDetailedStart, StringComparison.Ordinal);
+var toggleDetailedCode = toggleDetailedStart >= 0 && toggleDetailedEnd > toggleDetailedStart ? mainWindowCode.Substring(toggleDetailedStart, toggleDetailedEnd - toggleDetailedStart) : string.Empty;
+Assert(toggleDetailedCode.Contains("if (_viewModel.Expanded) _viewModel.IsAgentListOpen = false;", StringComparison.Ordinal) && toggleDetailedCode.Contains("else if (_settings.IsAgentListExpanded && _viewModel.HasActiveAgents)", StringComparison.Ordinal) && toggleDetailedCode.Contains("_viewModel.IsAgentListOpen = true;", StringComparison.Ordinal) && toggleDetailedCode.Contains("RepositionAgentListPopup();", StringComparison.Ordinal) && !toggleDetailedCode.Contains("IsAgentListExpanded =", StringComparison.Ordinal), "detailed mode closes only the physical agent popup and compact mode restores it only for the saved expanded preference with active agents");
+var agentRowsNow = new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero);
+var rootAgent = new ActiveAgent("root", null, 0, false, "Agent", "Principal", "Lendo", "gpt-5.6-sol", "high", agentRowsNow.AddMinutes(-1), agentRowsNow);
+var childAgent = new ActiveAgent("child", "root", 1, true, "Subagent", "Filho", "Implementando", "gpt-5.6-terra", "medium", agentRowsNow.AddSeconds(-30), agentRowsNow);
+agentRowsViewModel.ApplyAgents([rootAgent], agentRowsNow, false);
+agentRowsViewModel.ApplyAgents([rootAgent, childAgent], agentRowsNow.AddSeconds(1), true);
+Assert(agentRowsViewModel.ActiveAgents.Count == 2 && !agentRowsViewModel.ActiveAgents.Single(row => row.ThreadId == "root").IsNew && agentRowsViewModel.ActiveAgents.Single(row => row.ThreadId == "child").IsNew, "agent refresh preserves existing rows and flags only a newly appeared agent for entry animation");
+agentRowsViewModel.MarkNewAgentRowsStable();
+Assert(agentRowsViewModel.ActiveAgents.All(row => !row.IsNew), "agent row entry flags clear after their one-time animation");
 
 var resizeWorkArea = new ResizeWorkArea(-1920, 0, 1920, 1080);
 var compactStart = new ResizeBounds(-1500, 200, 124, 104);
@@ -414,6 +479,84 @@ var divergentAnalytics = new LocalUsageAnalyticsService();
 Assert(divergentAnalytics.Read(5.5m, divergentRoot).MonthTokens == 170, "same metadata id without a physical prefix remains independent evidence rather than being discarded");
 Assert(divergentAnalytics.DuplicatePhysicalFilesIgnoredLastRead == 0, "only proven physical checkpoint prefixes are deduplicated");
 Directory.Delete(divergentRoot, true);
+var activityRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-agent-activity-" + Guid.NewGuid());
+Directory.CreateDirectory(activityRoot);
+var activityNow = new DateTimeOffset(2026, 8, 14, 13, 30, 0, TimeSpan.Zero);
+var rootActivityPath = Path.Combine(activityRoot, "root.jsonl");
+File.WriteAllText(rootActivityPath, """
+{"timestamp":"2026-08-14T13:20:00Z","type":"session_meta","payload":{"session_id":"root-1","id":"root-1","thread_source":"user"}}
+{"timestamp":"2026-08-14T13:20:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-root"}}
+{"timestamp":"2026-08-14T13:20:02Z","type":"turn_context","payload":{"turn_id":"turn-root","model":"gpt-5.6-terra","effort":"medium"}}
+{"timestamp":"2026-08-14T13:29:45Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"  **Validando o build e os testes\ncom atencao aos detalhes"}}
+{"timestamp":"2026-08-14T13:29:47Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"   "}}
+{"timestamp":"2026-08-14T13:29:50Z","type":"event_msg","payload":{"type":"agent_message","phase":"commentary","message":"Validando o build\ncom detalhes"}}
+{"timestamp":"2026-08-14T13:29:52Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"commentary","text":"Output posterior diferente"}}
+""");
+var subagentActivityPath = Path.Combine(activityRoot, "subagent.jsonl");
+File.WriteAllText(subagentActivityPath, """
+{"timestamp":"2026-08-14T13:26:00Z","type":"session_meta","payload":{"session_id":"root-1","id":"sub-1","parent_thread_id":"root-1","thread_source":"subagent","agent_path":"/root/ui_review"}}
+{"timestamp":"2026-08-14T13:26:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-sub"}}
+{"timestamp":"2026-08-14T13:26:02Z","type":"turn_context","payload":{"turn_id":"turn-sub","model":"gpt-5.6-luna","effort":"low"}}
+{"timestamp":"2026-08-14T13:29:55Z","type":"event_msg","payload":{"type":"token_count"}}
+""");
+var grandchildActivityPath = Path.Combine(activityRoot, "grandchild.jsonl");
+File.WriteAllText(grandchildActivityPath, """
+{"timestamp":"2026-08-14T13:22:00Z","type":"session_meta","payload":{"session_id":"root-1","id":"grand-1","parent_thread_id":"sub-1","thread_source":"subagent","agent_path":"/root/ui_review/check"}}
+{"timestamp":"2026-08-14T13:22:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-grand"}}
+{"timestamp":"2026-08-14T13:29:54Z","type":"event_msg","payload":{"type":"token_count"}}
+""");
+var rootBActivityPath = Path.Combine(activityRoot, "root-b.jsonl");
+File.WriteAllText(rootBActivityPath, """
+{"timestamp":"2026-08-14T13:23:00Z","type":"session_meta","payload":{"session_id":"root-b","id":"root-b","thread_source":"user"}}
+{"timestamp":"2026-08-14T13:23:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-root-b"}}
+{"timestamp":"2026-08-14T13:29:53Z","type":"event_msg","payload":{"type":"token_count"}}
+""");
+var orphanActivityPath = Path.Combine(activityRoot, "orphan.jsonl");
+File.WriteAllText(orphanActivityPath, """
+{"timestamp":"2026-08-14T13:24:00Z","type":"session_meta","payload":{"session_id":"orphan","id":"orphan","parent_thread_id":"missing-parent","thread_source":"subagent"}}
+{"timestamp":"2026-08-14T13:24:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-orphan"}}
+{"timestamp":"2026-08-14T13:29:52Z","type":"event_msg","payload":{"type":"token_count"}}
+""");
+var cycleAActivityPath = Path.Combine(activityRoot, "cycle-a.jsonl");
+File.WriteAllText(cycleAActivityPath, """
+{"timestamp":"2026-08-14T13:25:00Z","type":"session_meta","payload":{"session_id":"cycle-a","id":"cycle-a","parent_thread_id":"cycle-b","thread_source":"subagent"}}
+{"timestamp":"2026-08-14T13:25:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-cycle-a"}}
+""");
+var cycleBActivityPath = Path.Combine(activityRoot, "cycle-b.jsonl");
+File.WriteAllText(cycleBActivityPath, """
+{"timestamp":"2026-08-14T13:26:00Z","type":"session_meta","payload":{"session_id":"cycle-b","id":"cycle-b","parent_thread_id":"cycle-a","thread_source":"subagent"}}
+{"timestamp":"2026-08-14T13:26:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-cycle-b"}}
+""");
+File.SetLastWriteTimeUtc(rootActivityPath, activityNow.UtcDateTime);
+File.SetLastWriteTimeUtc(subagentActivityPath, activityNow.UtcDateTime);
+File.SetLastWriteTimeUtc(grandchildActivityPath, activityNow.UtcDateTime);
+File.SetLastWriteTimeUtc(rootBActivityPath, activityNow.UtcDateTime);
+File.SetLastWriteTimeUtc(orphanActivityPath, activityNow.UtcDateTime);
+File.SetLastWriteTimeUtc(cycleAActivityPath, activityNow.UtcDateTime);
+File.SetLastWriteTimeUtc(cycleBActivityPath, activityNow.UtcDateTime);
+var activityService = new AgentActivityService(() => activityNow);
+var activeAgents = activityService.Read(new Dictionary<string, string> { ["root-1"] = "Indicador de agentes" }, activityRoot);
+Assert(activeAgents.Count == 7, "active task markers expose roots, descendants, orphans and cycles exactly once");
+Assert(activeAgents.Select(agent => agent.ThreadId).SequenceEqual(["root-1", "sub-1", "grand-1", "root-b", "orphan", "cycle-a", "cycle-b"]), "active agents are depth-first by stable roots and descendants, with cycle fallback order");
+var activeRoot = activeAgents.Single(x => x.ThreadId == "root-1");
+Assert(activeRoot.Type == "Agent" && activeRoot.HierarchyDepth == 0 && activeRoot.Title == "Indicador de agentes" && activeRoot.Status == "Validando o build e os testes" && activeRoot.Model == "gpt-5.6-terra" && activeRoot.Effort == "medium", "principal activity preserves title, active reasoning, model and effort even after later commentary");
+var activeSubagent = activeAgents.Single(x => x.ThreadId == "sub-1");
+Assert(activeSubagent.Type == "Subagent" && activeSubagent.HierarchyDepth == 1 && activeSubagent.Title == "ui review" && activeSubagent.ParentThreadId == "root-1" && activeSubagent.Model == "gpt-5.6-luna" && activeSubagent.Effort == "low", "subagent activity uses its own id, depth and safe path fallback title");
+Assert(activeAgents.Single(x => x.ThreadId == "grand-1").HierarchyDepth == 2 && activeAgents.Single(x => x.ThreadId == "root-b").HierarchyDepth == 0 && activeAgents.Single(x => x.ThreadId == "orphan").HierarchyDepth == 0, "grandchildren nest while roots with missing parents remain visual roots");
+File.AppendAllText(rootActivityPath, "\n{\"timestamp\":\"2026-08-14T13:29:58Z\",\"type\":\"event_msg\",\"payload\":");
+File.SetLastWriteTimeUtc(rootActivityPath, activityNow.UtcDateTime.AddSeconds(1));
+Assert(activityService.Read(null, activityRoot).Any(x => x.ThreadId == "root-1"), "partial active JSONL line does not erase the committed running state");
+File.AppendAllText(rootActivityPath, "{\"type\":\"task_complete\",\"turn_id\":\"turn-root\"}}\n");
+File.SetLastWriteTimeUtc(rootActivityPath, activityNow.UtcDateTime.AddSeconds(2));
+Assert(activityService.Read(null, activityRoot).All(x => x.ThreadId != "root-1"), "matching task_complete removes the principal from the running list after a partial append completes");
+var staleActivityPath = Path.Combine(activityRoot, "stale.jsonl");
+File.WriteAllText(staleActivityPath, """
+{"timestamp":"2026-08-14T12:00:00Z","type":"session_meta","payload":{"session_id":"stale","id":"stale","thread_source":"user"}}
+{"timestamp":"2026-08-14T12:00:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"stale-turn"}}
+""");
+File.SetLastWriteTimeUtc(staleActivityPath, activityNow.AddMinutes(-10).UtcDateTime);
+Assert(activityService.Read(null, activityRoot).All(x => x.ThreadId != "stale"), "abandoned task_started files age out instead of remaining falsely active");
+Directory.Delete(activityRoot, true);
 Console.WriteLine("All CodexTracker core tests passed.");
 
 static void Assert(bool condition, string message) { if (!condition) throw new InvalidOperationException("Test failed: " + message); }

@@ -29,7 +29,13 @@ public static class WeeklyForecastCalculator
         return new("Risco de esgotar antes do reset", projected, exhausts);
     }
 
-    public static string FormatProjectedPercent(double projected) => projected < 101
-        ? projected.ToString("0.0", System.Globalization.CultureInfo.GetCultureInfo("pt-BR")) + "%"
-        : projected.ToString("0", System.Globalization.CultureInfo.GetCultureInfo("pt-BR")) + "%";
+    public static string FormatProjectedPercent(double projected) => FormatProjectedPercent(projected, "pt-BR");
+
+    public static string FormatProjectedPercent(double projected, string? languageCode)
+    {
+        var culture = string.Equals(languageCode?.Trim(), "en-US", StringComparison.OrdinalIgnoreCase)
+            ? System.Globalization.CultureInfo.GetCultureInfo("en-US")
+            : System.Globalization.CultureInfo.GetCultureInfo("pt-BR");
+        return projected < 101 ? projected.ToString("0.0", culture) + "%" : projected.ToString("0", culture) + "%";
+    }
 }

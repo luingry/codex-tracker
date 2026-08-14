@@ -11,6 +11,7 @@
     <SolidColorBrush x:Key="Apricot" Color="#F7D6B9" />
     <SolidColorBrush x:Key="Lavender" Color="#DFD7F1" />
     <SolidColorBrush x:Key="Accent" Color="#0D8F6F" />
+    <Color x:Key="AccentGlow">#2BA98A</Color>
     <SolidColorBrush x:Key="RiskWarning" Color="#B66A00" />
     <SolidColorBrush x:Key="GaugeTrack" Color="#CCD5D1" />
     <SolidColorBrush x:Key="DetailedSurface" Color="#FFF7F7F4" />
@@ -165,7 +166,8 @@
           <ControlTemplate TargetType="ProgressBar">
             <Border Background="{TemplateBinding Background}" CornerRadius="3" ClipToBounds="True">
               <Grid x:Name="PART_Track">
-                <Border x:Name="PART_Indicator" Background="{TemplateBinding Foreground}" CornerRadius="3" HorizontalAlignment="Left" />
+                <Border x:Name="PART_Indicator" Background="{TemplateBinding Foreground}" CornerRadius="3" HorizontalAlignment="Left" ClipToBounds="True">
+                </Border>
               </Grid>
             </Border>
           </ControlTemplate>
