@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.11.10] - 2026-08-14
+
+### Fixed
+
+- The compact active-agent glow is now anchored to the indicator's inner edge: a transparent-centered radial band expands inward and brightens without scaling a central disk or rotating.
+
 ## [0.11.9] - 2026-08-14
 
 ### Fixed

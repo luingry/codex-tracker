@@ -66,9 +66,15 @@
                   <Border x:Name="AgentIndicatorSurface" Background="#2D2D2D" CornerRadius="10" ClipToBounds="True">
                     <Border.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Opacity=".30" Color="#151A18" /></Border.Effect>
                     <Grid>
-                      <Ellipse x:Name="AgentWorkGlow" Width="18" Height="18" Fill="#FFFFFF" Opacity=".10" Visibility="Collapsed" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
-                        <Ellipse.Effect><BlurEffect Radius="4" /></Ellipse.Effect>
-                        <Ellipse.RenderTransform><ScaleTransform x:Name="AgentWorkGlowScale" ScaleX=".55" ScaleY=".55" /></Ellipse.RenderTransform>
+                      <Ellipse x:Name="AgentWorkGlow" Width="18" Height="18" Opacity=".10" Visibility="Collapsed" IsHitTestVisible="False">
+                        <Ellipse.Fill>
+                          <RadialGradientBrush Center="0.5,0.5" GradientOrigin="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                            <GradientStop Color="Transparent" Offset="0" />
+                            <GradientStop x:Name="AgentWorkGlowInnerEdge" Color="Transparent" Offset=".88" />
+                            <GradientStop Color="#FFFFFF" Offset="1" />
+                          </RadialGradientBrush>
+                        </Ellipse.Fill>
+                        <Ellipse.Effect><BlurEffect Radius="1.5" /></Ellipse.Effect>
                       </Ellipse>
                       <TextBlock x:Name="AgentCount" Text="{Binding ActiveAgentCount}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="11.5" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                       <Path x:Name="AgentArrow" Width="9" Height="6" Data="M1,1L5,5L9,1" Stretch="Uniform" Stroke="White" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
@@ -89,9 +95,8 @@
                     <DataTrigger.EnterActions>
                       <BeginStoryboard x:Name="AgentWorkGlowStoryboard">
                         <Storyboard RepeatBehavior="Forever">
-                          <DoubleAnimation Storyboard.TargetName="AgentWorkGlowScale" Storyboard.TargetProperty="ScaleX" From=".55" To="1.0" Duration="0:0:1.40" AutoReverse="True" />
-                          <DoubleAnimation Storyboard.TargetName="AgentWorkGlowScale" Storyboard.TargetProperty="ScaleY" From=".55" To="1.0" Duration="0:0:1.40" AutoReverse="True" />
-                          <DoubleAnimation Storyboard.TargetName="AgentWorkGlow" Storyboard.TargetProperty="Opacity" From=".10" To=".34" Duration="0:0:1.40" AutoReverse="True" />
+                          <DoubleAnimation Storyboard.TargetName="AgentWorkGlowInnerEdge" Storyboard.TargetProperty="Offset" From=".88" To=".58" Duration="0:0:1.00" AutoReverse="True" />
+                          <DoubleAnimation Storyboard.TargetName="AgentWorkGlow" Storyboard.TargetProperty="Opacity" From=".10" To=".34" Duration="0:0:1.00" AutoReverse="True" />
                         </Storyboard>
                       </BeginStoryboard>
                     </DataTrigger.EnterActions>
