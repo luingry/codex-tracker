@@ -1,5 +1,19 @@
 # Erros e solucoes conhecidas
 
+## Abertura detalhada concorria leitura fria dos rollouts com a quota oficial
+
+- **Sintoma:** ao abrir diretamente no modo detalhado, se analytics terminasse antes do primeiro snapshot de quota, o painel podia permanecer sem dados locais até a próxima atualização periódica.
+- **Causa:** o handler de analytics aplicava seu resultado apenas quando `_client.Snapshot` já existia, descartando silenciosamente o resultado que vencesse a corrida de inicialização.
+- **Solucao:** quota e analytics continuam paralelos, mas um coordenador thread-safe retém analytics até o primeiro snapshot e o consome uma única vez. Cada conexão recebe uma geração; callbacks antigos são rejeitados antes e dentro do dispatcher, e o cliente anterior é encerrado antes da nova descoberta. A busca do executável também cede o dispatcher via `Task.Run` com o token de shutdown, sem mover o `Process.Start` do app-server.
+- **Prevencao:** em inicialização, não serializar fontes independentes apenas para evitar corridas. Guardar resultados prontos com ownership explícito, versionar callbacks de recursos substituíveis, medir o painel completo como `max(quota, analytics)` e cobrir ambos os ordenamentos e callbacks obsoletos por teste determinístico.
+
+## Parse frio do histórico local bloqueava a abertura detalhada
+
+- **Sintoma:** o primeiro analytics de um histórico grande podia levar vários segundos, embora leituras aquecidas fossem muito menores.
+- **Causa:** o serviço analisava cada JSONL frio em série; as métricas de cache aquecido não representavam a abertura real.
+- **Solucao:** a fase pura de parse por arquivo usa no máximo duas tarefas paralelas. Cada leitura termina no tamanho capturado pela assinatura inicial, adiando bytes acrescentados por um writer para o próximo ciclo. Assinaturas, cache, tails parciais, contadores, merge e deduplicação continuam consolidados serialmente e em ordem estável.
+- **Prevencao:** medir parse frio com instâncias novas do serviço e informar arquivos, bytes, totais e mediana; não paralelizar o app-server ou serviços que já possuem seu próprio gate.
+
 ## Widget restaurava na tela primaria apos uma reinstalacao com varios monitores
 
 - **Sintoma:** uma posicao persistida na tela secundaria, por exemplo `Left=2877, Top=176`, voltava para a tela primaria depois de reinstalar.

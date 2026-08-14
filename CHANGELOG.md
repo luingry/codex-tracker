@@ -10,12 +10,17 @@
 
 ### Fixed
 
+- O parse frio do histórico local agora processa arquivos JSONL independentes em paralelo limitado e lê cada arquivo somente até o tamanho capturado no planejamento, mantendo cache, deduplicação e resultados determinísticos; numa cópia estável do histórico local de 394 arquivos/532,8 MB, a mediana caiu de 5.002 ms para 3.007 ms (aprox. 40%).
+- A abertura detalhada mantém quota oficial e analytics locais em paralelo, mas agora preserva o resultado que terminar primeiro: se analytics terminar antes do snapshot, ele é aplicado uma única vez quando a quota chega, sem releitura nem painel incompleto.
 - A lista de agents permanece totalmente fechada no modo detalhado, inclusive quando um novo agent começa a trabalhar depois da troca de modo.
 - Hover e ripple das linhas de agents/subagents agora ocupam toda a largura do wrapper, com respiro vertical ao redor do texto sem perder a indentação hierárquica.
 - O glow de trabalho não aparece mais nas barras do ranking; ele permanece exclusivo do gauge semanal de quota.
 - O seletor de período Dia/Semana/Mês do ranking agora sinaliza interação com cursor de mão no hover.
 - Modelo e effort na lista de agents agora usam uma variante menos saturada, mas com contraste garantido, da cor de destaque escolhida.
 - Labels do painel de configurações agora compartilham tipografia e cor semântica; checkboxes têm respiro maior e ComboBox preserva texto contrastante nos temas claro e escuro.
+- O botão visível de Pin foi removido do chrome; a preferência Sempre no topo continua disponível e persistida exclusivamente nas configurações.
+- Modelo e effort passaram para a mesma linha do tipo na lista de agents; o tempo de execução fica alinhado à direita na linha de status, com truncamento para títulos e metadados longos.
+- O tema escuro agora usa `#2D2D2D` como superfície-base consistente; Settings ajusta automaticamente a altura ao conteúdo dentro da área de trabalho, bloqueia resize manual, amplia o respiro dos checkboxes e deixa ComboBox mais confortável e claramente interativo.
 
 ## [0.10.6] - 2026-08-14
 

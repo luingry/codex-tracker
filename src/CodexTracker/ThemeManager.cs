@@ -11,7 +11,7 @@ internal static class ThemeManager
     {
         var dark = string.Equals(theme, "Escuro", StringComparison.OrdinalIgnoreCase);
         var accent = AccentPalette.Create(accentColor, dark);
-        Set("Porcelain", dark ? "#202321" : "#F7F7F4");
+        Set("Porcelain", dark ? AccentPalette.DarkSurfaceHex : "#F7F7F4");
         Set("Ink", dark ? "#F1F4F2" : "#202523");
         Set("SoftInk", dark ? "#AEB9B4" : "#59635F");
         Set("Sage", accent.SoftHex);
@@ -22,11 +22,11 @@ internal static class ThemeManager
         SetColor("AccentGlow", accent.GlowHex);
         Set("RiskWarning", dark ? "#FFD166" : "#B66A00");
         Set("GaugeTrack", dark ? "#46504C" : "#CCD5D1");
-        Set("DetailedSurface", dark ? "#FF202321" : "#FFF7F7F4");
-        Set("GlassSurface", dark ? "#FF202321" : "#FFF7F7F4");
-        Set("GlassLavender", dark ? "#FF2A2E2C" : "#FFEAE8EF");
-        Set("SettingsSurface", dark ? "#FF191C1B" : "#FFF2F2EE");
-        Set("InputSurface", dark ? "#FF303633" : "#FFE7EBE8");
+        Set("DetailedSurface", dark ? "#FF2D2D2D" : "#FFF7F7F4");
+        Set("GlassSurface", dark ? "#FF2D2D2D" : "#FFF7F7F4");
+        Set("GlassLavender", dark ? "#FF363636" : "#FFEAE8EF");
+        Set("SettingsSurface", dark ? "#FF2D2D2D" : "#FFF2F2EE");
+        Set("InputSurface", dark ? "#FF3A3A3A" : "#FFE7EBE8");
         Set("HoverSurface", accent.HoverHex);
     }
     private static void Set(string key, string hex) => System.Windows.Application.Current.Resources[key] =

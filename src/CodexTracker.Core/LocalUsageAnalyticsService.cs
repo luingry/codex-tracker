@@ -41,8 +41,13 @@ public sealed class LocalUsageAnalyticsService
 {
     private readonly Dictionary<string, CachedFile> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<DateTimeOffset> _clock;
+    private readonly int _maxParseParallelism;
 
-    public LocalUsageAnalyticsService(Func<DateTimeOffset>? clock = null) => _clock = clock ?? (() => DateTimeOffset.Now);
+    public LocalUsageAnalyticsService(Func<DateTimeOffset>? clock = null, int? maxParseParallelism = null)
+    {
+        _clock = clock ?? (() => DateTimeOffset.Now);
+        _maxParseParallelism = Math.Max(1, Math.Min(2, maxParseParallelism ?? Environment.ProcessorCount));
+    }
     public int FilesParsedLastRead { get; private set; }
     public int FilesRebuiltLastRead { get; private set; }
     public int FilesAppendedLastRead { get; private set; }
@@ -90,7 +95,8 @@ public sealed class LocalUsageAnalyticsService
         if (files.Length == 0) return new(0, 0, 0, 0, 0, []);
         var activePaths = files.Select(x => x.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var stale in _cache.Keys.Where(x => !activePaths.Contains(x)).ToArray()) _cache.Remove(stale);
-        var candidates = new List<LogicalFileCandidate>(files.Length);
+        var candidateCaches = new Dictionary<string, CachedFile>(StringComparer.OrdinalIgnoreCase);
+        var parsePlans = new List<ParsePlan>(files.Length);
         foreach (var file in files)
         {
             try
@@ -101,42 +107,70 @@ public sealed class LocalUsageAnalyticsService
                 var hasCommittedTail = HasFinalNewline(file.Path, signature.Length);
                 if (!hasCommittedTail)
                 {
-                    var partial = ParseAggregate(file.Path, 0, null, "unknown", file.IsFork, timelineCutoff);
-                    candidates.Add(new(file, new CachedFile(signature, file.IsFork, partial.Buckets, partial.Timeline, partial.ModelTimeline, partial.LastTotals, partial.LastModel, "")));
-                    FilesParsedLastRead++;
-                    FilesRebuiltLastRead++;
-                    BytesReadLastRead += signature.Length;
+                    parsePlans.Add(new(file, signature, null, ParseKind.Partial));
                     _cache.Remove(file.Path);
                     continue;
                 }
                 if (!_cache.TryGetValue(file.Path, out var cached) || cached.IsFork != file.IsFork || signature.Length < cached.Signature.Length || (signature.Length == cached.Signature.Length && signature.LastWriteUtcTicks != cached.Signature.LastWriteUtcTicks) || (signature.Length > cached.Signature.Length && PrefixMarker.Create(file.Path, cached.Signature.Length) != cached.PrefixMarker))
                 {
-                    var parsed = ParseAggregate(file.Path, 0, null, "unknown", file.IsFork, timelineCutoff);
-                    cached = new CachedFile(signature, file.IsFork, parsed.Buckets, parsed.Timeline, parsed.ModelTimeline, parsed.LastTotals, parsed.LastModel, PrefixMarker.Create(file.Path, signature.Length));
-                    _cache[file.Path] = cached;
-                    FilesParsedLastRead++;
-                    FilesRebuiltLastRead++;
-                    BytesReadLastRead += signature.Length;
+                    parsePlans.Add(new(file, signature, null, ParseKind.Rebuild));
                 }
                 else if (signature.Length > cached.Signature.Length)
                 {
-                    var previousLength = cached.Signature.Length;
-                    var appended = ParseAggregate(file.Path, previousLength, cached.LastTotals, cached.LastModel, cached.IsFork, timelineCutoff);
-                    MergeBuckets(cached.Buckets, appended.Buckets);
-                    MergeTimeline(cached.Timeline, appended.Timeline);
-                    MergeModelTimeline(cached.ModelTimeline, appended.ModelTimeline);
-                    cached = cached with { Signature = signature, LastTotals = appended.LastTotals ?? cached.LastTotals, LastModel = appended.LastModel, PrefixMarker = PrefixMarker.Create(file.Path, signature.Length) };
-                    _cache[file.Path] = cached;
-                    FilesParsedLastRead++;
-                    FilesAppendedLastRead++;
-                    BytesReadLastRead += signature.Length - previousLength;
+                    parsePlans.Add(new(file, signature, cached, ParseKind.Append));
                 }
-                foreach (var staleTimeline in cached.Timeline.Keys.Where(key => key.At < timelineCutoff).ToArray()) cached.Timeline.Remove(staleTimeline);
-                foreach (var staleTimeline in cached.ModelTimeline.Keys.Where(key => key.At < timelineCutoff).ToArray()) cached.ModelTimeline.Remove(staleTimeline);
-                candidates.Add(new(file, cached));
+                else candidateCaches[file.Path] = cached;
             }
             catch (Exception ex) { SanitizedLogger.Write("Analytics file error: " + ex.GetType().Name); }
         }
+        var parseResults = new ParsePlanResult[parsePlans.Count];
+        Parallel.For(0, parsePlans.Count, new ParallelOptions { MaxDegreeOfParallelism = _maxParseParallelism }, index =>
+        {
+            var plan = parsePlans[index];
+            try
+            {
+                var offset = plan.Kind == ParseKind.Append ? plan.Previous!.Signature.Length : 0;
+                var baseline = plan.Kind == ParseKind.Append ? plan.Previous!.LastTotals : null;
+                var model = plan.Kind == ParseKind.Append ? plan.Previous!.LastModel : "unknown";
+                parseResults[index] = new(plan, ParseAggregate(plan.File.Path, offset, plan.Signature.Length, baseline, model, plan.File.IsFork, timelineCutoff), null);
+            }
+            catch (Exception ex) { parseResults[index] = new(plan, null, ex); }
+        });
+        foreach (var result in parseResults)
+        {
+            if (result.Error is not null) { SanitizedLogger.Write("Analytics file error: " + result.Error.GetType().Name); continue; }
+            var plan = result.Plan;
+            var parsed = result.Parsed!;
+            if (parsed.MalformedLineCount > 0)
+                SanitizedLogger.Write("Analytics malformed JSONL lines skipped: " + parsed.MalformedLineCount);
+            CachedFile cached;
+            if (plan.Kind == ParseKind.Append)
+            {
+                cached = plan.Previous!;
+                var previousLength = cached.Signature.Length;
+                MergeBuckets(cached.Buckets, parsed.Buckets);
+                MergeTimeline(cached.Timeline, parsed.Timeline);
+                MergeModelTimeline(cached.ModelTimeline, parsed.ModelTimeline);
+                cached = cached with { Signature = plan.Signature, LastTotals = parsed.LastTotals ?? cached.LastTotals, LastModel = parsed.LastModel, PrefixMarker = PrefixMarker.Create(plan.File.Path, plan.Signature.Length) };
+                FilesAppendedLastRead++;
+                BytesReadLastRead += plan.Signature.Length - previousLength;
+            }
+            else
+            {
+                cached = new CachedFile(plan.Signature, plan.File.IsFork, parsed.Buckets, parsed.Timeline, parsed.ModelTimeline, parsed.LastTotals, parsed.LastModel, plan.Kind == ParseKind.Partial ? "" : PrefixMarker.Create(plan.File.Path, plan.Signature.Length));
+                FilesRebuiltLastRead++;
+                BytesReadLastRead += plan.Signature.Length;
+            }
+            FilesParsedLastRead++;
+            if (plan.Kind != ParseKind.Partial) _cache[plan.File.Path] = cached;
+            candidateCaches[plan.File.Path] = cached;
+        }
+        foreach (var cached in candidateCaches.Values)
+        {
+            foreach (var staleTimeline in cached.Timeline.Keys.Where(key => key.At < timelineCutoff).ToArray()) cached.Timeline.Remove(staleTimeline);
+            foreach (var staleTimeline in cached.ModelTimeline.Keys.Where(key => key.At < timelineCutoff).ToArray()) cached.ModelTimeline.Remove(staleTimeline);
+        }
+        var candidates = files.Where(file => candidateCaches.ContainsKey(file.Path)).Select(file => new LogicalFileCandidate(file, candidateCaches[file.Path])).ToList();
         // Only collapse physical copies when their bytes prove that one is a checkpoint-prefix
         // of the other. Equal session ids alone are insufficient: a subagent JSONL embeds its
         // parent metadata and independent segments may legitimately share ancestry.
@@ -221,15 +255,17 @@ public sealed class LocalUsageAnalyticsService
         return new(path, sessionId ?? path, fileId ?? path, fork, startedAt);
     }
 
-    private static ParseAggregateResult ParseAggregate(string file, long offset, Totals? baseline, string model, bool isFork, DateTimeOffset timelineCutoff)
+    private static ParseAggregateResult ParseAggregate(string file, long offset, long snapshotLength, Totals? baseline, string model, bool isFork, DateTimeOffset timelineCutoff)
     {
         var buckets = new Dictionary<BucketKey, Aggregate>();
         var timeline = new Dictionary<TimelineKey, TimelineAggregate>();
         var modelTimeline = new Dictionary<ModelTimelineKey, TimelineAggregate>();
         using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         stream.Seek(offset, SeekOrigin.Begin);
-        using var reader = new StreamReader(stream);
+        using var bounded = new BoundedReadStream(stream, Math.Max(0, snapshotLength - offset));
+        using var reader = new StreamReader(bounded);
         string? line;
+        var malformedLineCount = 0;
         while ((line = reader.ReadLine()) is not null)
         {
             try
@@ -264,17 +300,20 @@ public sealed class LocalUsageAnalyticsService
                     }
                 }
             }
-            catch (JsonException) { SanitizedLogger.Write("Analytics malformed JSONL line skipped"); }
+            catch (JsonException) { malformedLineCount++; }
         }
-        return new ParseAggregateResult(buckets, timeline, modelTimeline, baseline, model);
+        return new ParseAggregateResult(buckets, timeline, modelTimeline, baseline, model, malformedLineCount);
     }
 
     private static string? ReadString(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     private static DateTimeOffset? ReadTimestamp(JsonElement element) => ReadString(element, "timestamp") is { } value && DateTimeOffset.TryParse(value, out var timestamp) ? timestamp.ToUniversalTime() : null;
     private sealed record FileDescriptor(string Path, string SessionId, string FileId, bool IsFork, DateTimeOffset? StartedAt);
     private sealed record LogicalFileCandidate(FileDescriptor File, CachedFile Cache);
+    private enum ParseKind { Partial, Rebuild, Append }
+    private sealed record ParsePlan(FileDescriptor File, FileSignature Signature, CachedFile? Previous, ParseKind Kind);
+    private sealed record ParsePlanResult(ParsePlan Plan, ParseAggregateResult? Parsed, Exception? Error);
     private sealed record CachedFile(FileSignature Signature, bool IsFork, Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Totals? LastTotals, string LastModel, string PrefixMarker);
-    private sealed record ParseAggregateResult(Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Totals? LastTotals, string LastModel);
+    private sealed record ParseAggregateResult(Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Totals? LastTotals, string LastModel, int MalformedLineCount);
     private readonly record struct FileSignature(long Length, long LastWriteUtcTicks)
     {
         public static FileSignature Create(string path)
@@ -305,9 +344,38 @@ public sealed class LocalUsageAnalyticsService
     {
         if (length == 0) return true;
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        stream.Seek(-1, SeekOrigin.End);
+        stream.Seek(length - 1, SeekOrigin.Begin);
         var last = stream.ReadByte();
         return last is '\n' or '\r';
+    }
+
+    private sealed class BoundedReadStream : Stream
+    {
+        private readonly Stream _inner;
+        private readonly long _length;
+        private long _remaining;
+        public BoundedReadStream(Stream inner, long length)
+        {
+            _inner = inner;
+            _length = length;
+            _remaining = length;
+        }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => _length;
+        public override long Position { get => _length - _remaining; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_remaining <= 0) return 0;
+            var read = _inner.Read(buffer, offset, (int)Math.Min(count, _remaining));
+            _remaining -= read;
+            return read;
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private readonly record struct BucketKey(DateTime Day, string Model);

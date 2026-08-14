@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly LocalUsageAnalyticsService _analytics = new();
+    private readonly StartupAnalyticsCoordinator _startupAnalytics = new();
     private readonly AgentActivityService _agentActivity = new();
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(60) };
     private readonly DispatcherTimer _agentTimer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -118,27 +119,67 @@ public partial class MainWindow : Window
             return;
         }
         if (Interlocked.Exchange(ref _connecting, 1) == 1) return;
+        var connectionGeneration = _startupAnalytics.BeginConnection();
         try
         {
-            var executable = CodexExecutableDiscovery.Find(_settings.CodexPath);
+            if (_client is { } previousClient)
+            {
+                _client = null;
+                await previousClient.DisposeAsync();
+            }
+            var executable = await Task.Run(
+                () => CodexExecutableDiscovery.Find(_settings.CodexPath),
+                _shutdown.Token);
+            _shutdown.Token.ThrowIfCancellationRequested();
             if (executable is null) { _viewModel.Status = LocalizationManager.Text("CodexNotFound"); SanitizedLogger.Write("Discovery failed"); return; }
             SanitizedLogger.Write("App-server starting: " + executable);
-            if (_client is not null) await _client.DisposeAsync();
-            _client = new CodexAppServerClient(executable);
-            _client.StatusChanged += status => Dispatcher.Invoke(() => _viewModel.Status = status.StartsWith("Connection interrupted", StringComparison.Ordinal)
-                ? LocalizationManager.Text("StaleReconnecting")
-                : status == "Connecting to Codex" ? LocalizationManager.Text("ConnectingToCodex")
-                : status == "Live from Codex" ? LocalizationManager.Text("LiveData")
-                : status);
-            _client.SnapshotUpdated += snapshot =>
+            var client = new CodexAppServerClient(executable);
+            Action<string> statusChanged = status =>
             {
-                _ = Dispatcher.InvokeAsync(() => _viewModel.ApplyQuota(snapshot));
+                if (!_startupAnalytics.IsCurrent(connectionGeneration)) return;
+                Dispatcher.Invoke(() =>
+                {
+                    if (!_startupAnalytics.IsCurrent(connectionGeneration)) return;
+                    _viewModel.Status = status.StartsWith("Connection interrupted", StringComparison.Ordinal)
+                        ? LocalizationManager.Text("StaleReconnecting")
+                        : status == "Connecting to Codex" ? LocalizationManager.Text("ConnectingToCodex")
+                        : status == "Live from Codex" ? LocalizationManager.Text("LiveData")
+                        : status;
+                });
+            };
+            Action<RateLimitSnapshot> snapshotUpdated = snapshot =>
+            {
+                var pendingUsage = _startupAnalytics.OnSnapshot(snapshot, _viewModel.Expanded, connectionGeneration);
+                if (!_startupAnalytics.IsCurrent(connectionGeneration)) return;
+                _ = Dispatcher.InvokeAsync(() =>
+                {
+                    if (!_startupAnalytics.IsCurrent(connectionGeneration)) return;
+                    _viewModel.ApplyQuota(snapshot);
+                    if (pendingUsage is not null && _viewModel.Expanded)
+                        _viewModel.Apply(snapshot, pendingUsage, _settings.CurrencyCode);
+                });
                 var weekly = snapshot.Windows.FirstOrDefault(x => x.Id == "codex:primary" && x.WindowDurationMins >= 10000);
                 SanitizedLogger.Write($"Quota snapshot summary: windows={snapshot.Windows.Count}, weekly={(weekly is null ? "missing" : weekly.UsedPercent.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture))}");
             };
-            await _client.StartAsync(_shutdown.Token);
+            client.StatusChanged += statusChanged;
+            client.SnapshotUpdated += snapshotUpdated;
+            _client = client;
+            try
+            {
+                await client.StartAsync(_shutdown.Token);
+            }
+            catch
+            {
+                client.StatusChanged -= statusChanged;
+                client.SnapshotUpdated -= snapshotUpdated;
+                if (ReferenceEquals(_client, client)) _client = null;
+                try { await client.DisposeAsync(); }
+                catch { }
+                throw;
+            }
             SanitizedLogger.Write("App-server initialized and read");
         }
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { }
         catch (Exception exception) { _viewModel.Status = LocalizationManager.Text("ConnectionError"); SanitizedLogger.Write("Connect error: " + exception.GetType().Name); }
         finally { Volatile.Write(ref _connecting, 0); }
     }
@@ -160,8 +201,13 @@ public partial class MainWindow : Window
         try
         {
             var usage = await _analytics.ReadAsync(_settings.UsdBrl);
-            if (_viewModel.Expanded && _client?.Snapshot is { } snapshot)
-                await Dispatcher.InvokeAsync(() => _viewModel.Apply(snapshot, usage, _settings.CurrencyCode));
+            var ready = _startupAnalytics.OnAnalyticsReady(usage, _viewModel.Expanded);
+            if (ready is { } application)
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (_viewModel.Expanded)
+                        _viewModel.Apply(application.Snapshot, application.Usage, _settings.CurrencyCode);
+                });
         }
         catch (Exception exception)
         {
@@ -248,7 +294,6 @@ public partial class MainWindow : Window
         finally { DestroyIcon(handle); }
     }
 
-    private void ToggleTopmost(object sender, RoutedEventArgs e) { Topmost = !Topmost; _viewModel.Topmost = Topmost; Save(); }
     private void ToggleAgentList(object sender, RoutedEventArgs e)
     {
         var isOpen = !_viewModel.IsAgentListOpen;
@@ -390,6 +435,7 @@ public partial class MainWindow : Window
         CaptureCurrentModeSize();
         SettingsPanel.Visibility = Visibility.Visible;
         ApplyWindowModeSize();
+        ScheduleSettingsHeightForContent();
     }
     private void CurrencyChanged(object sender, SelectionChangedEventArgs e) => UpdateCurrencyRateVisibility();
     private void UpdateCurrencyRateVisibility() => RatePanel.Visibility = CurrencyBox.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -618,6 +664,7 @@ public partial class MainWindow : Window
 
     private ResizeEdge GetResizeEdge(System.Windows.Point position)
     {
+        if (SettingsPanel.Visibility == Visibility.Visible) return ResizeEdge.None;
         var verticalOnly = _viewModel.Expanded || SettingsPanel.Visibility == Visibility.Visible;
         if (!verticalOnly) return GetCompactResizeEdge(position);
 
@@ -667,6 +714,7 @@ public partial class MainWindow : Window
 
     private void ApplyManualResize(System.Windows.Point screenPoint)
     {
+        if (SettingsPanel.Visibility == Visibility.Visible) return;
         var delta = new ResizeVector(screenPoint.X - _resizeStartScreen.X, screenPoint.Y - _resizeStartScreen.Y);
         var start = new ResizeBounds(_resizeStartBounds.Left, _resizeStartBounds.Top, _resizeStartBounds.Width, _resizeStartBounds.Height);
         var handle = ToResizeHandle(_resizeEdge);
@@ -766,7 +814,7 @@ public partial class MainWindow : Window
             Width = WidgetSizePolicy.DetailedWidth;
             MinHeight = WidgetSizePolicy.SettingsMinHeight;
             MaxHeight = WidgetSizePolicy.SettingsMaxHeight;
-            Height = size.Height;
+            Height = WidgetSizePolicy.SettingsMinHeight;
         }
         else
         {
@@ -777,6 +825,22 @@ public partial class MainWindow : Window
             SetCompactSize(size.Width);
         }
         ApplyBackdrop(_settings.Theme);
+    }
+    private void ScheduleSettingsHeightForContent() => Dispatcher.BeginInvoke(
+        System.Windows.Threading.DispatcherPriority.Render,
+        new Action(FitSettingsToContent));
+
+    private void FitSettingsToContent()
+    {
+        if (CurrentVisualMode != WidgetVisualMode.Settings) return;
+
+        SettingsPanel.Measure(new System.Windows.Size(WidgetSizePolicy.DetailedWidth, double.PositiveInfinity));
+        var workArea = GetResizeWorkArea();
+        var safeMaximum = Math.Min(WidgetSizePolicy.SettingsMaxHeight, Math.Max(1d, Math.Floor(workArea.Height)));
+        var height = WidgetSizePolicy.SettingsHeightForContent(SettingsPanel.DesiredSize.Height, workArea.Height);
+        MinHeight = Math.Min(WidgetSizePolicy.SettingsMinHeight, safeMaximum);
+        MaxHeight = safeMaximum;
+        Height = height;
     }
     private void DetailedContentLayoutUpdated(object? sender, EventArgs e)
     {

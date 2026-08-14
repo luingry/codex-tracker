@@ -65,6 +65,16 @@ public static class WidgetSizePolicy
             ? DetailedMaxHeight
             : Net48Compatibility.Clamp(Math.Ceiling(contentHeight), DetailedMinHeight, DetailedMaxHeight);
 
+    public static double SettingsHeightForContent(double contentHeight, double workAreaHeight)
+    {
+        var safeMaximum = IsFinitePositive(workAreaHeight)
+            ? Math.Min(SettingsMaxHeight, Math.Max(1d, Math.Floor(workAreaHeight)))
+            : SettingsMaxHeight;
+        var safeMinimum = Math.Min(SettingsMinHeight, safeMaximum);
+        var requested = IsFinitePositive(contentHeight) ? Math.Ceiling(contentHeight) : SettingsMinHeight;
+        return Net48Compatibility.Clamp(requested, safeMinimum, safeMaximum);
+    }
+
     public static WidgetModeSizes With(WidgetModeSizes slots, WidgetVisualMode mode, WidgetSize size)
     {
         var normalized = Normalize(mode, size);

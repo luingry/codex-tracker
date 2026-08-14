@@ -1,7 +1,103 @@
 using System.IO;
+using System.Diagnostics;
 using System.Text.Json;
 using CodexTracker.Core;
 using CodexTracker;
+
+if (args.Contains("--benchmark-analytics", StringComparer.OrdinalIgnoreCase))
+{
+    var benchmarkRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-benchmark-" + Guid.NewGuid());
+    Directory.CreateDirectory(benchmarkRoot);
+    var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    var sourceRoots = new[] { Path.Combine(userProfile, ".codex", "sessions"), Path.Combine(userProfile, ".codex", "archived_sessions") };
+    var copiedFiles = 0;
+    foreach (var sourceRoot in sourceRoots.Where(Directory.Exists))
+    {
+        foreach (var sourcePath in Directory.EnumerateFiles(sourceRoot, "*.jsonl", SearchOption.AllDirectories))
+        {
+            CopyFileSnapshot(sourcePath, Path.Combine(benchmarkRoot, $"{copiedFiles++:D5}-{Path.GetFileName(sourcePath)}"));
+        }
+    }
+    var samples = new Dictionary<int, List<long>> { [1] = [], [2] = [] };
+    UsageAnalytics? reference = null;
+    foreach (var degree in new[] { 1, 2, 2, 1, 1, 2 })
+    {
+        var service = new LocalUsageAnalyticsService(maxParseParallelism: degree);
+        var stopwatch = Stopwatch.StartNew();
+        var usage = service.Read(5.5m, benchmarkRoot);
+        var elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+        samples[degree].Add(elapsedMilliseconds);
+        if (reference is null) reference = usage;
+        else if (usage.MonthTokens != reference.MonthTokens || usage.TodayTokens != reference.TodayTokens || usage.MonthUsd != reference.MonthUsd || usage.TodayUsd != reference.TodayUsd)
+            throw new InvalidOperationException("Sequential and parallel analytics returned different totals during the benchmark.");
+        Console.WriteLine($"cold-service degree={degree} sample={samples[degree].Count} ms={elapsedMilliseconds} files={service.FilesParsedLastRead} bytes={service.BytesReadLastRead} monthTokens={usage.MonthTokens} todayTokens={usage.TodayTokens}");
+    }
+    foreach (var degree in new[] { 1, 2 })
+    {
+        samples[degree].Sort();
+        Console.WriteLine($"cold-service degree={degree} medianMs={samples[degree][samples[degree].Count / 2]} minMs={samples[degree][0]} maxMs={samples[degree][samples[degree].Count - 1]}");
+    }
+    Directory.Delete(benchmarkRoot, true);
+    return;
+}
+
+var mainWindowSource = File.ReadAllText(FindRepositoryFile("src", "CodexTracker", "MainWindow.xaml.cs"));
+var themeManagerSource = File.ReadAllText(FindRepositoryFile("src", "CodexTracker", "ThemeManager.cs"));
+var loadedHandlerStart = mainWindowSource.IndexOf("Loaded += (_, _) =>", StringComparison.Ordinal);
+var loadedHandlerEnd = mainWindowSource.IndexOf("Closing += OnClosing;", loadedHandlerStart, StringComparison.Ordinal);
+var loadedHandler = mainWindowSource.Substring(loadedHandlerStart, loadedHandlerEnd - loadedHandlerStart);
+Assert(loadedHandler.Contains("_ = LoadAsync();", StringComparison.Ordinal) &&
+       loadedHandler.Contains("_ = RefreshAgentsAsync();", StringComparison.Ordinal) &&
+       loadedHandler.Contains("if (_viewModel.Expanded) _ = RefreshAnalyticsAsync();", StringComparison.Ordinal),
+       "startup keeps quota, agents and detailed analytics independent and parallel");
+var snapshotHandlerStart = mainWindowSource.IndexOf("Action<RateLimitSnapshot> snapshotUpdated = snapshot =>", StringComparison.Ordinal);
+var snapshotHandlerEnd = mainWindowSource.IndexOf("await client.StartAsync", snapshotHandlerStart, StringComparison.Ordinal);
+var snapshotHandler = mainWindowSource.Substring(snapshotHandlerStart, snapshotHandlerEnd - snapshotHandlerStart);
+Assert(snapshotHandler.IndexOf("_viewModel.ApplyQuota(snapshot)", StringComparison.Ordinal) >= 0 &&
+       snapshotHandler.IndexOf("_startupAnalytics.OnSnapshot", StringComparison.Ordinal) >= 0 &&
+       mainWindowSource.Contains("_startupAnalytics.OnAnalyticsReady", StringComparison.Ordinal),
+       "the startup race joins quota and analytics without discarding whichever finishes first");
+Assert(mainWindowSource.Contains("await Task.Run(", StringComparison.Ordinal) &&
+       mainWindowSource.Contains("() => CodexExecutableDiscovery.Find(_settings.CodexPath)", StringComparison.Ordinal) &&
+       mainWindowSource.Contains("_shutdown.Token);", StringComparison.Ordinal),
+       "Codex executable discovery leaves the UI dispatcher with shutdown cancellation before app-server startup");
+var discoveryAwait = mainWindowSource.IndexOf("() => CodexExecutableDiscovery.Find(_settings.CodexPath)", StringComparison.Ordinal);
+var startupReset = mainWindowSource.LastIndexOf("_startupAnalytics.BeginConnection();", discoveryAwait, StringComparison.Ordinal);
+var cancellationCheck = mainWindowSource.IndexOf("_shutdown.Token.ThrowIfCancellationRequested();", discoveryAwait, StringComparison.Ordinal);
+var clientCreation = mainWindowSource.IndexOf("var client = new CodexAppServerClient(executable);", cancellationCheck, StringComparison.Ordinal);
+Assert(startupReset >= 0 && startupReset < discoveryAwait && cancellationCheck > discoveryAwait && clientCreation > cancellationCheck,
+       "startup coordination resets before asynchronous discovery, then shutdown is rechecked before app-server client creation");
+Assert(mainWindowSource.Contains("client.StatusChanged -= statusChanged;", StringComparison.Ordinal) &&
+       mainWindowSource.Contains("client.SnapshotUpdated -= snapshotUpdated;", StringComparison.Ordinal) &&
+       mainWindowSource.Contains("if (ReferenceEquals(_client, client)) _client = null;", StringComparison.Ordinal) &&
+       mainWindowSource.Contains("await client.DisposeAsync();", StringComparison.Ordinal),
+       "a failed app-server start detaches callbacks, clears ownership and disposes the newly created client");
+
+var coordinatorNow = new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero);
+var coordinatorSnapshot = new RateLimitSnapshot([new("codex:primary", "Weekly", 20, coordinatorNow.AddDays(4), 10080)], null, null, null, coordinatorNow);
+var coordinatorUsage = new UsageAnalytics(123, 456, 1.2m, 6.6m, 100, []);
+var analyticsFirstCoordinator = new StartupAnalyticsCoordinator();
+var analyticsFirstGeneration = analyticsFirstCoordinator.BeginConnection();
+Assert(analyticsFirstCoordinator.OnAnalyticsReady(coordinatorUsage, true) is null, "analytics first waits for the startup quota snapshot without being discarded");
+Assert(analyticsFirstCoordinator.OnSnapshot(coordinatorSnapshot, true, analyticsFirstGeneration) == coordinatorUsage && analyticsFirstCoordinator.OnSnapshot(coordinatorSnapshot, true, analyticsFirstGeneration) is null, "quota first consumes an analytics-first result exactly once");
+var snapshotFirstCoordinator = new StartupAnalyticsCoordinator();
+var snapshotFirstGeneration = snapshotFirstCoordinator.BeginConnection();
+Assert(snapshotFirstCoordinator.OnSnapshot(coordinatorSnapshot, true, snapshotFirstGeneration) is null, "quota first has no pending analytics result to consume");
+var snapshotFirstApplication = snapshotFirstCoordinator.OnAnalyticsReady(coordinatorUsage, true);
+Assert(snapshotFirstApplication is { } && snapshotFirstApplication.Value.Snapshot == coordinatorSnapshot && snapshotFirstApplication.Value.Usage == coordinatorUsage, "analytics first after a quota snapshot applies immediately against that snapshot");
+var reconnectPendingCoordinator = new StartupAnalyticsCoordinator();
+var staleGeneration = reconnectPendingCoordinator.BeginConnection();
+Assert(reconnectPendingCoordinator.OnAnalyticsReady(coordinatorUsage, true) is null, "analytics-first result is pending before reconnect");
+var currentGeneration = reconnectPendingCoordinator.BeginConnection();
+Assert(!reconnectPendingCoordinator.IsCurrent(staleGeneration) && reconnectPendingCoordinator.OnSnapshot(coordinatorSnapshot, true, staleGeneration) is null, "a callback from the previous app-server generation cannot repopulate the coordinator during reconnect");
+Assert(reconnectPendingCoordinator.OnSnapshot(coordinatorSnapshot, true, currentGeneration) == coordinatorUsage && reconnectPendingCoordinator.OnSnapshot(coordinatorSnapshot, true, currentGeneration) is null, "reconnect preserves pending local analytics until the current snapshot consumes it once");
+var reconnectSnapshotCoordinator = new StartupAnalyticsCoordinator();
+var previousSnapshotGeneration = reconnectSnapshotCoordinator.BeginConnection();
+_ = reconnectSnapshotCoordinator.OnSnapshot(coordinatorSnapshot, true, previousSnapshotGeneration);
+var nextSnapshotGeneration = reconnectSnapshotCoordinator.BeginConnection();
+Assert(reconnectSnapshotCoordinator.OnAnalyticsReady(coordinatorUsage, true) is null, "analytics after reconnect never applies against the old snapshot");
+Assert(reconnectSnapshotCoordinator.OnSnapshot(coordinatorSnapshot, true, nextSnapshotGeneration) == coordinatorUsage, "analytics after reconnect waits for and applies against the new snapshot");
+Assert(mainWindowSource.Contains("_startupAnalytics.BeginConnection();", StringComparison.Ordinal) && mainWindowSource.Contains("_startupAnalytics.IsCurrent(connectionGeneration)", StringComparison.Ordinal), "new app-server clients invalidate previous callbacks before asynchronous discovery and recheck generation on the dispatcher");
 
 var trayOnlyExtendedStyle = TrayOnlyWindowPolicy.ToTrayOnlyExtendedStyle(TrayOnlyWindowPolicy.AppWindowExtendedStyle | 0x00000008L);
 Assert((trayOnlyExtendedStyle & TrayOnlyWindowPolicy.ToolWindowExtendedStyle) != 0 && (trayOnlyExtendedStyle & TrayOnlyWindowPolicy.AppWindowExtendedStyle) == 0 && (trayOnlyExtendedStyle & 0x00000008L) != 0, "tray-only policy adds WS_EX_TOOLWINDOW, removes WS_EX_APPWINDOW, and preserves unrelated extended styles");
@@ -15,9 +111,10 @@ Assert(BackdropCompositionPolicy.ForMode(WidgetVisualMode.Compact) == new Backdr
 var lightAccent = AccentPalette.Create("#FFB000", false);
 var darkAccent = AccentPalette.Create("#FFB000", true);
 Assert(lightAccent.BaseHex == "#FFB000" && darkAccent.BaseHex == "#FFB000", "accent palette preserves the user's canonical seed color across themes");
-Assert(AccentPalette.ContrastRatio(lightAccent.AccentHex, "#F7F7F4") >= 4.5 && AccentPalette.ContrastRatio(darkAccent.AccentHex, "#202321") >= 4.5, "derived accent text remains readable on light and dark primary surfaces");
+Assert(AccentPalette.DarkSurfaceHex == "#2D2D2D" && AccentPalette.ContrastRatio(lightAccent.AccentHex, "#F7F7F4") >= 4.5 && AccentPalette.ContrastRatio(darkAccent.AccentHex, AccentPalette.DarkSurfaceHex) >= 4.5, "derived accent text remains readable on light and the exact #2D2D2D dark primary surface");
 Assert(lightAccent.SoftHex != lightAccent.AccentHex && lightAccent.HoverHex != lightAccent.AccentHex && lightAccent.GlowHex != lightAccent.AccentHex, "a single accent seed derives distinct soft, hover and glow tonal roles");
-Assert(AccentPalette.ContrastRatio(lightAccent.AgentMetadataHex, "#F7F7F4") >= 4.5 && AccentPalette.ContrastRatio(darkAccent.AgentMetadataHex, "#202321") >= 4.5 && AccentPalette.Saturation(lightAccent.AgentMetadataHex) < AccentPalette.Saturation(lightAccent.AccentHex) && AccentPalette.Saturation(darkAccent.AgentMetadataHex) < AccentPalette.Saturation(darkAccent.AccentHex), "agent model and effort receive a less saturated but contrast-safe accent role in both themes");
+Assert(AccentPalette.ContrastRatio(lightAccent.AgentMetadataHex, "#F7F7F4") >= 4.5 && AccentPalette.ContrastRatio(darkAccent.AgentMetadataHex, AccentPalette.DarkSurfaceHex) >= 4.5 && AccentPalette.Saturation(lightAccent.AgentMetadataHex) < AccentPalette.Saturation(lightAccent.AccentHex) && AccentPalette.Saturation(darkAccent.AgentMetadataHex) < AccentPalette.Saturation(darkAccent.AccentHex), "agent model and effort receive a less saturated but contrast-safe accent role in both themes");
+Assert(themeManagerSource.Contains("Set(\"Porcelain\", dark ? AccentPalette.DarkSurfaceHex", StringComparison.Ordinal) && themeManagerSource.Contains("Set(\"DetailedSurface\", dark ? \"#FF2D2D2D\"", StringComparison.Ordinal) && themeManagerSource.Contains("Set(\"GlassSurface\", dark ? \"#FF2D2D2D\"", StringComparison.Ordinal) && themeManagerSource.Contains("Set(\"SettingsSurface\", dark ? \"#FF2D2D2D\"", StringComparison.Ordinal), "dark primary, detailed, glass and settings surfaces consistently use the requested #2D2D2D base");
 Assert(AccentPalette.Normalize("invalid") == AccentPalette.DefaultBaseHex && AccentPalette.Normalize("0d8f6f") == "#0D8F6F", "invalid accent settings fall back safely while valid hex colors normalize canonically");
 
 LocalizationManager.Apply("en-US");
@@ -61,6 +158,7 @@ Assert(compactSize.Width == 100 && Math.Abs(compactSize.Height * 62 - compactSiz
 Assert(WidgetSizePolicy.Normalize(WidgetVisualMode.Detailed, new WidgetSize(1, 999)) == new WidgetSize(300, 720), "detailed size keeps fixed width and clamps visible height");
 Assert(WidgetSizePolicy.Normalize(WidgetVisualMode.Detailed, new WidgetSize(300, 300)) == new WidgetSize(300, 300) && WidgetSizePolicy.Normalize(WidgetVisualMode.Detailed, new WidgetSize(300, 1)) == new WidgetSize(300, 260), "detailed preserves resized heights down to 260 and clamps below it");
 Assert(WidgetSizePolicy.Normalize(WidgetVisualMode.Settings, new WidgetSize(double.NaN, 0)) == WidgetSizePolicy.Default(WidgetVisualMode.Settings), "invalid settings size falls back to its safe default");
+Assert(WidgetSizePolicy.SettingsHeightForContent(612.2, 1000) == 613 && WidgetSizePolicy.SettingsHeightForContent(1000, 600) == 600 && WidgetSizePolicy.SettingsHeightForContent(100, 300) == 300, "settings content height expands to the required whole DIP while respecting the work-area and policy cap");
 Assert(WidgetSizePolicy.DetailedMaxHeightForContent(512.2) == 513 && WidgetSizePolicy.DetailedMaxHeightForContent(999) == WidgetSizePolicy.DetailedMaxHeight, "detailed maximum height follows rounded content height without exceeding the safety cap");
 var independentSlots = WidgetSizePolicy.NormalizeSlots(new WidgetModeSizes(new(124, 10), new(300, 480), new(300, 600)), false, new(62, 52));
 Assert(WidgetSizePolicy.Get(independentSlots, WidgetVisualMode.Compact) == new WidgetSize(100, 100 / (62d / 52d)) && WidgetSizePolicy.Get(independentSlots, WidgetVisualMode.Detailed) == new WidgetSize(300, 480) && WidgetSizePolicy.Get(independentSlots, WidgetVisualMode.Settings) == new WidgetSize(300, 600), "persisted compact widths above 100 clamp without changing detailed and settings slots");
@@ -106,11 +204,13 @@ var indicatorStart = mainWindowXaml.IndexOf("x:Name=\"AgentIndicatorButton\"", S
 var indicatorEnd = mainWindowXaml.IndexOf("<Popup x:Name=\"AgentListPopup\"", indicatorStart, StringComparison.Ordinal);
 var indicatorTemplate = indicatorStart >= 0 && indicatorEnd > indicatorStart ? mainWindowXaml.Substring(indicatorStart, indicatorEnd - indicatorStart) : string.Empty;
 Assert(indicatorTemplate.Contains("<Trigger Property=\"IsMouseOver\" Value=\"True\">", StringComparison.Ordinal) && indicatorTemplate.Contains("TargetName=\"AgentCount\" Property=\"Visibility\" Value=\"Collapsed\"", StringComparison.Ordinal) && indicatorTemplate.Contains("TargetName=\"AgentArrow\" Property=\"Visibility\" Value=\"Visible\"", StringComparison.Ordinal) && !indicatorTemplate.Contains("<MultiDataTrigger>", StringComparison.Ordinal), "agent indicator hover has one direct IsMouseOver trigger that swaps the count for the chevron independently of open state");
+Assert(indicatorTemplate.Contains("x:Name=\"AgentIndicatorSurface\" Background=\"#2D2D2D\"", StringComparison.Ordinal), "the fixed dark agent indicator follows the exact #2D2D2D dark-surface standard");
 var agentListStart = mainWindowXaml.IndexOf("<Popup x:Name=\"AgentListPopup\"", StringComparison.Ordinal);
 var agentListEnd = mainWindowXaml.IndexOf("</Popup>", agentListStart, StringComparison.Ordinal);
 var agentListTemplate = agentListStart >= 0 && agentListEnd > agentListStart ? mainWindowXaml.Substring(agentListStart, agentListEnd - agentListStart) : string.Empty;
 Assert(agentListTemplate.Contains("x:Name=\"AgentListWrapper\" Width=\"288\" MaxHeight=\"350\" Padding=\"0,8\"", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"AgentRow\" Margin=\"0,2\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Border Margin=\"{Binding Indent}\" Padding=\"15,6\">", StringComparison.Ordinal), "agent row hover and ripple span the full wrapper width while content keeps vertical breathing room and hierarchy indentation");
 Assert(agentListTemplate.Contains("Text=\"{Binding ModelAndEffort}\"", StringComparison.Ordinal) && agentListTemplate.Contains("Foreground=\"{DynamicResource AgentMetadataAccent}\"", StringComparison.Ordinal), "agent model and effort bind to the contrast-safe muted accent resource instead of fixed opacity or generic secondary ink");
+Assert(agentListTemplate.Contains("<Grid.ColumnDefinitions><ColumnDefinition Width=\"*\" /><ColumnDefinition Width=\"118\" /></Grid.ColumnDefinitions>", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"KindLabel\" Text=\"{Binding Type}\"", StringComparison.Ordinal) && agentListTemplate.Contains("Grid.Column=\"1\" Text=\"{Binding ModelAndEffort}\"", StringComparison.Ordinal) && agentListTemplate.Contains("Grid.Column=\"1\" Text=\"{Binding Elapsed}\"", StringComparison.Ordinal) && !agentListTemplate.Contains("Grid.Row=\"3\" Text=\"{Binding ModelAndEffort}\"", StringComparison.Ordinal), "agent kind and model/effort share a truncating two-column header while elapsed moves to the right side of the status row without overlap");
 Assert(mainWindowXaml.Contains("x:Name=\"AccentColorButton\" Click=\"ChooseAccentColor\"", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"AccentColorSwatch\"", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"AccentColorValue\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Color=\"{DynamicResource AccentGlow}\"", StringComparison.Ordinal), "settings expose an accessible accent color picker and the agent ripple glow follows the derived palette");
 Assert(mainWindowXaml.Contains("x:Name=\"LanguageBox\" SelectionChanged=\"PreviewLanguage\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Tag=\"pt-BR\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Tag=\"en-US\"", StringComparison.Ordinal) && mainWindowXaml.Contains("{DynamicResource Loc.Settings}", StringComparison.Ordinal), "settings expose pt-BR/en-US selection and static UI strings use dynamic localization resources");
 var rankingPeriodStyleStart = mainWindowXaml.IndexOf("<Style TargetType=\"RadioButton\">", StringComparison.Ordinal);
@@ -125,8 +225,9 @@ Assert(localizedKeys.All(key => !string.IsNullOrWhiteSpace(LocalizationManager.T
 LocalizationManager.Apply("pt-BR");
 var appXaml = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "App.xaml"));
 Assert(appXaml.Contains("<Style x:Key=\"SettingsLabelStyle\" TargetType=\"TextBlock\">", StringComparison.Ordinal) && appXaml.Contains("<Setter Property=\"FontSize\" Value=\"11\" />", StringComparison.Ordinal) && appXaml.Contains("<Setter Property=\"FontWeight\" Value=\"SemiBold\" />", StringComparison.Ordinal) && appXaml.Contains("<Setter Property=\"Foreground\" Value=\"{DynamicResource SoftInk}\" />", StringComparison.Ordinal), "settings labels share a semantic typography and color style");
-Assert(appXaml.Contains("Foreground=\"{TemplateBinding Foreground}\" Focusable=\"False\"", StringComparison.Ordinal) && appXaml.Split(new[] { "TextElement.Foreground=\"{TemplateBinding Foreground}\"" }, StringSplitOptions.None).Length >= 4 && appXaml.Contains("Margin=\"0,0,10,0\"", StringComparison.Ordinal), "combo selection, dropdown items and standard checkbox labels inherit the theme foreground while checkboxes keep comfortable spacing");
-Assert(mainWindowXaml.Contains("Text=\"{DynamicResource Loc.DarkTheme}\" Style=\"{StaticResource SettingsLabelStyle}\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Text=\"{DynamicResource Loc.Language}\" Style=\"{StaticResource SettingsLabelStyle}\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Text=\"{DynamicResource Loc.CodexPath}\" Style=\"{StaticResource SettingsLabelStyle}\"", StringComparison.Ordinal), "settings field labels consistently use the shared semantic style");
+Assert(appXaml.Contains("Foreground=\"{TemplateBinding Foreground}\" Cursor=\"{TemplateBinding Cursor}\" Focusable=\"False\"", StringComparison.Ordinal) && appXaml.Split(new[] { "TextElement.Foreground=\"{TemplateBinding Foreground}\"" }, StringSplitOptions.None).Length >= 4 && appXaml.Contains("<Setter Property=\"Padding\" Value=\"14,6\" />", StringComparison.Ordinal) && appXaml.Contains("<Setter Property=\"Cursor\" Value=\"Hand\" />", StringComparison.Ordinal) && appXaml.Contains("Margin=\"0,0,13,0\"", StringComparison.Ordinal), "combo selection and items inherit high-contrast foreground, larger left padding and a hand cursor while standard checkbox labels keep expanded spacing");
+Assert(appXaml.Contains("<Style x:Key=\"SettingsChoiceStyle\" TargetType=\"CheckBox\"", StringComparison.Ordinal) && appXaml.Contains("<Setter Property=\"Foreground\" Value=\"{DynamicResource SoftInk}\" />", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"DetailedBox\" Content=\"{DynamicResource Loc.DetailedMode}\" Style=\"{StaticResource SettingsChoiceStyle}\" Foreground=\"{DynamicResource SoftInk}\"", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"TopmostBox\" Content=\"{DynamicResource Loc.AlwaysOnTop}\" Style=\"{StaticResource SettingsChoiceStyle}\" Foreground=\"{DynamicResource SoftInk}\"", StringComparison.Ordinal), "settings checkbox choices share the semantic secondary foreground explicitly without affecting ThemeSwitch");
+Assert(mainWindowSource.Contains("if (SettingsPanel.Visibility == Visibility.Visible) return ResizeEdge.None;", StringComparison.Ordinal) && mainWindowSource.Contains("if (SettingsPanel.Visibility == Visibility.Visible) return;", StringComparison.Ordinal) && mainWindowSource.Contains("ScheduleSettingsHeightForContent();", StringComparison.Ordinal) && mainWindowSource.Contains("WidgetSizePolicy.SettingsHeightForContent(SettingsPanel.DesiredSize.Height, workArea.Height)", StringComparison.Ordinal), "settings disables manual resize and fits its required content height within the monitor work area");
 var progressStyleStart = appXaml.IndexOf("<Style TargetType=\"ProgressBar\">", StringComparison.Ordinal);
 var progressStyleEnd = appXaml.IndexOf("</Style>", progressStyleStart, StringComparison.Ordinal);
 var progressStyle = progressStyleStart >= 0 && progressStyleEnd > progressStyleStart ? appXaml.Substring(progressStyleStart, progressStyleEnd - progressStyleStart) : string.Empty;
@@ -136,6 +237,7 @@ var reasoningGlowEnd = mainWindowXaml.IndexOf("</DataTemplate>", reasoningGlowSt
 var reasoningGlowTemplate = reasoningGlowStart >= 0 && reasoningGlowEnd > reasoningGlowStart ? mainWindowXaml.Substring(reasoningGlowStart, reasoningGlowEnd - reasoningGlowStart) : string.Empty;
 Assert(reasoningGlowTemplate.Contains("<LinearGradientBrush MappingMode=\"Absolute\" StartPoint=\"0,0.5\" EndPoint=\"64,0.5\">", StringComparison.Ordinal) && reasoningGlowTemplate.Contains("<LinearGradientBrush.Transform><TranslateTransform x:Name=\"ReasoningGlowTransform\" X=\"-64\" /></LinearGradientBrush.Transform>", StringComparison.Ordinal) && !reasoningGlowTemplate.Contains("LinearGradientBrush.RelativeTransform", StringComparison.Ordinal) && reasoningGlowTemplate.Contains("KeyTime=\"0:0:0\" Value=\"-64\"", StringComparison.Ordinal) && reasoningGlowTemplate.Contains("KeyTime=\"0:0:1.30\" Value=\"268\"", StringComparison.Ordinal) && reasoningGlowTemplate.Contains("KeyTime=\"0:0:3.30\" Value=\"268\"", StringComparison.Ordinal) && reasoningGlowTemplate.Contains("<DataTrigger Binding=\"{Binding IsWorkAnimationEnabled}\" Value=\"True\">", StringComparison.Ordinal) && reasoningGlowTemplate.Contains("<StopStoryboard BeginStoryboardName=\"ReasoningGlowStoryboard\" />", StringComparison.Ordinal), "reasoning glow uses a fixed 64-DIP absolute band, a 1.30-second left-to-right sweep, two-second hold, and the work-animation/reduced-motion trigger");
 var mainWindowCode = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "MainWindow.xaml.cs"));
+Assert(!mainWindowXaml.Contains("Click=\"ToggleTopmost\"", StringComparison.Ordinal) && !mainWindowCode.Contains("private void ToggleTopmost", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"TopmostBox\" Content=\"{DynamicResource Loc.AlwaysOnTop}\"", StringComparison.Ordinal) && mainWindowCode.Contains("Topmost = TopmostBox.IsChecked == true;", StringComparison.Ordinal), "the visible pin control and its dead handler are removed while the Settings topmost preference remains functional");
 Assert(mainWindowXaml.Contains("x:Name=\"CodexPathFallbackPanel\" Visibility=\"Collapsed\"", StringComparison.Ordinal) && !mainWindowXaml.Contains("Click=\"AutoDetect\"", StringComparison.Ordinal) && !mainWindowXaml.Contains("Click=\"TestPath\"", StringComparison.Ordinal), "manual Codex path UI is a collapsed fallback and does not expose the obsolete auto-detect or test actions");
 Assert(mainWindowCode.Contains("var automaticallyDetectedPath = CodexExecutableDiscovery.Find(null);", StringComparison.Ordinal) && mainWindowCode.Contains("CodexPathFallbackPanel.Visibility = automaticallyDetectedPath is null ? Visibility.Visible : Visibility.Collapsed;", StringComparison.Ordinal) && mainWindowCode.Contains("PathBox.Text = automaticallyDetectedPath ?? _settings.CodexPath ?? \"\";", StringComparison.Ordinal), "settings show the manual Codex path fallback only when automatic discovery fails and otherwise keep the detected or persisted path available");
 Assert(mainWindowCode.Contains("var manualCodexPath = CodexPathFallbackPanel.Visibility == Visibility.Visible", StringComparison.Ordinal) && mainWindowCode.Contains("? string.IsNullOrWhiteSpace(PathBox.Text) ? null : PathBox.Text", StringComparison.Ordinal) && mainWindowCode.Contains(": _settings.CodexPath;", StringComparison.Ordinal), "applying settings clears or accepts PathBox only while the fallback is visible and preserves the stored Codex path while it is hidden");
@@ -143,7 +245,7 @@ Assert(mainWindowCode.Contains("CreateTrayIcon(_settings.AccentColor)", StringCo
 Assert(mainWindowCode.Contains("previousIcon?.Dispose();", StringComparison.Ordinal) && mainWindowCode.Contains("previousMenu?.Dispose();", StringComparison.Ordinal) && mainWindowCode.Contains("_trayMenu?.Dispose();", StringComparison.Ordinal) && mainWindowCode.Contains("_trayIcon?.Dispose();", StringComparison.Ordinal), "repeated language previews replace and deterministically dispose tray icon and menu native resources");
 Assert(mainWindowCode.Contains("LocalizationManager.Apply(_settings.LanguageCode);", StringComparison.Ordinal) && mainWindowCode.Contains("LanguageCode = language", StringComparison.Ordinal) && mainWindowCode.Contains("private void PreviewLanguage", StringComparison.Ordinal), "language preview, cancel restoration and apply persistence are wired through the settings lifecycle");
 var refreshAgentsStart = mainWindowCode.IndexOf("private async Task RefreshAgentsAsync", StringComparison.Ordinal);
-var refreshAgentsEnd = mainWindowCode.IndexOf("private void ToggleTopmost", refreshAgentsStart, StringComparison.Ordinal);
+var refreshAgentsEnd = mainWindowCode.IndexOf("private void ToggleAgentList", refreshAgentsStart, StringComparison.Ordinal);
 var refreshAgentsCode = refreshAgentsStart >= 0 && refreshAgentsEnd > refreshAgentsStart ? mainWindowCode.Substring(refreshAgentsStart, refreshAgentsEnd - refreshAgentsStart) : string.Empty;
 Assert(refreshAgentsCode.Contains("else if (_settings.IsAgentListExpanded && !_viewModel.Expanded) _viewModel.IsAgentListOpen = true;", StringComparison.Ordinal), "agent refresh never opens the list while detailed mode is active");
 var toggleDetailedStart = mainWindowCode.IndexOf("private void ToggleDetailed", StringComparison.Ordinal);
@@ -309,8 +411,12 @@ File.WriteAllText(Path.Combine(analyticsRoot, "session.jsonl"), """
 malformed
 """);
 var analyticsNow = new DateTimeOffset(2026, 8, 12, 12, 0, 0, TimeSpan.Zero);
-var analytics = new LocalUsageAnalyticsService(() => analyticsNow).Read(5.5m, analyticsRoot);
+var analyticsService = new LocalUsageAnalyticsService(() => analyticsNow);
+var analytics = analyticsService.Read(5.5m, analyticsRoot);
+var analyticsReferenceService = new LocalUsageAnalyticsService(() => analyticsNow, maxParseParallelism: 1);
+var analyticsReference = analyticsReferenceService.Read(5.5m, analyticsRoot);
 Assert(analytics.MonthTokens == 180, "cumulative token snapshots use deltas, never 430");
+Assert(analytics.MonthTokens == analyticsReference.MonthTokens && analytics.TodayTokens == analyticsReference.TodayTokens && analytics.MonthUsd == analyticsReference.MonthUsd && analytics.TodayUsd == analyticsReference.TodayUsd && analyticsService.FilesParsedLastRead == analyticsReferenceService.FilesParsedLastRead && analyticsService.FilesRebuiltLastRead == analyticsReferenceService.FilesRebuiltLastRead && analyticsService.BytesReadLastRead == analyticsReferenceService.BytesReadLastRead && analyticsService.FilesParsedLastRead == 1 && analyticsService.FilesRebuiltLastRead == 1 && analyticsService.BytesReadLastRead > 0, "bounded-parallel and sequential cold analytics preserve identical results and counters");
 Assert(analytics.TodayUsd == 0.0003825m && analytics.TodayBrl == 0.00210375m, "today cost uses the same priced token buckets and configured BRL rate as the month");
 var dailySeries = analytics.DailySeries ?? throw new InvalidOperationException("daily series missing");
 Assert(dailySeries.Count == 31 && dailySeries.Sum(x => x.Tokens) == analytics.MonthTokens, "current-month chart includes every calendar day and sums exactly to month usage");
@@ -406,6 +512,30 @@ File.WriteAllText(Path.Combine(analyticsRoot, "switch.jsonl"), """
 analytics = new LocalUsageAnalyticsService().Read(5.5m, analyticsRoot);
 Assert(analytics.Models.Any(x => x.Model == "unknown-model" && !x.Priced), "unknown model remains visible and unpriced");
 Directory.Delete(analyticsRoot, true);
+var parallelAnalyticsRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-parallel-analytics-" + Guid.NewGuid());
+Directory.CreateDirectory(parallelAnalyticsRoot);
+for (var index = 0; index < 4; index++)
+{
+    var total = (index + 1) * 100;
+    var contextLine = JsonSerializer.Serialize(new { timestamp = $"2026-08-12T1{index}:00:00Z", payload = new { type = "turn_context", model = $"gpt-5.6-model-{index}" } });
+    var tokenLine = JsonSerializer.Serialize(new { timestamp = $"2026-08-12T1{index}:01:00Z", payload = new { type = "token_count", info = new { total_token_usage = new { input_tokens = total, cached_input_tokens = 0, output_tokens = 0, total_tokens = total } } } });
+    File.WriteAllText(Path.Combine(parallelAnalyticsRoot, $"session-{index}.jsonl"), contextLine + "\n" + tokenLine + "\n");
+}
+var sequentialParallelFixtureService = new LocalUsageAnalyticsService(() => analyticsNow, maxParseParallelism: 1);
+var boundedParallelFixtureService = new LocalUsageAnalyticsService(() => analyticsNow, maxParseParallelism: 2);
+var sequentialParallelFixture = sequentialParallelFixtureService.Read(5.5m, parallelAnalyticsRoot);
+var boundedParallelFixture = boundedParallelFixtureService.Read(5.5m, parallelAnalyticsRoot);
+Assert(JsonSerializer.Serialize(boundedParallelFixture) == JsonSerializer.Serialize(sequentialParallelFixture) &&
+       sequentialParallelFixtureService.FilesParsedLastRead == 4 && boundedParallelFixtureService.FilesParsedLastRead == 4 &&
+       sequentialParallelFixtureService.FilesRebuiltLastRead == 4 && boundedParallelFixtureService.FilesRebuiltLastRead == 4 &&
+       sequentialParallelFixtureService.BytesReadLastRead == boundedParallelFixtureService.BytesReadLastRead,
+       "four independent cold files produce byte-for-byte identical analytics and counters with sequential and bounded-parallel parsing");
+var analyticsServiceSource = File.ReadAllText(FindRepositoryFile("src", "CodexTracker.Core", "LocalUsageAnalyticsService.cs"));
+Assert(analyticsServiceSource.Contains("ParseAggregate(plan.File.Path, offset, plan.Signature.Length", StringComparison.Ordinal) &&
+       analyticsServiceSource.Contains("new BoundedReadStream(stream, Math.Max(0, snapshotLength - offset))", StringComparison.Ordinal) &&
+       analyticsServiceSource.Contains("stream.Seek(length - 1, SeekOrigin.Begin);", StringComparison.Ordinal),
+       "cold parsing is bounded to each planned file signature so concurrent writer growth is deferred instead of double-counted");
+Directory.Delete(parallelAnalyticsRoot, true);
 var forksRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-forks-" + Guid.NewGuid());
 Directory.CreateDirectory(forksRoot);
 File.WriteAllText(Path.Combine(forksRoot, "root.jsonl"), """
@@ -578,3 +708,27 @@ Console.WriteLine("All CodexTracker core tests passed.");
 static void Assert(bool condition, string message) { if (!condition) throw new InvalidOperationException("Test failed: " + message); }
 static bool NearlyEqual(double? actual, double expected) => actual is double value && Math.Abs(value - expected) < 0.000001;
 static bool NearlyEqualInstant(DateTimeOffset? actual, DateTimeOffset expected) => actual is { } value && Math.Abs((value - expected).TotalMilliseconds) < 1;
+static string FindRepositoryFile(params string[] segments)
+{
+    for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+    {
+        var candidate = Path.Combine([directory.FullName, .. segments]);
+        if (File.Exists(candidate)) return candidate;
+    }
+    throw new FileNotFoundException("Repository source file not found.", Path.Combine(segments));
+}
+
+static void CopyFileSnapshot(string sourcePath, string destinationPath)
+{
+    using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+    using var destination = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+    var remaining = source.Length;
+    var buffer = new byte[128 * 1024];
+    while (remaining > 0)
+    {
+        var read = source.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
+        if (read == 0) break;
+        destination.Write(buffer, 0, read);
+        remaining -= read;
+    }
+}

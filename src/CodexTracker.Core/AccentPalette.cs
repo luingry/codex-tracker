@@ -7,6 +7,7 @@ public sealed record AccentThemePalette(string BaseHex, string AccentHex, string
 public static class AccentPalette
 {
     public const string DefaultBaseHex = "#0D8F6F";
+    public const string DarkSurfaceHex = "#2D2D2D";
 
     public static string Normalize(string? value)
     {
@@ -21,13 +22,13 @@ public static class AccentPalette
     {
         var normalized = Normalize(baseHex);
         var seed = Parse(normalized);
-        var surface = dark ? new Rgb(0x20, 0x23, 0x21) : new Rgb(0xF7, 0xF7, 0xF4);
+        var surface = dark ? Parse(DarkSurfaceHex) : new Rgb(0xF7, 0xF7, 0xF4);
         var accent = EnsureContrast(seed, surface, dark ? new Rgb(255, 255, 255) : new Rgb(0, 0, 0), 4.5);
         var soft = dark
             ? Mix(seed, surface, 0.70)
             : Mix(seed, surface, 0.82);
         var hover = dark
-            ? Mix(seed, new Rgb(0x30, 0x36, 0x33), 0.78)
+            ? Mix(seed, new Rgb(0x3A, 0x3A, 0x3A), 0.78)
             : Mix(seed, new Rgb(0xE7, 0xEB, 0xE8), 0.84);
         var glow = Mix(accent, new Rgb(255, 255, 255), dark ? 0.18 : 0.12);
         var agentMetadata = EnsureContrast(Desaturate(accent, 0.45), surface, dark ? new Rgb(255, 255, 255) : new Rgb(0, 0, 0), 4.5);
