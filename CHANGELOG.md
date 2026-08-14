@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.11.1] - 2026-08-14
+
+### Fixed
+
+- O ComboBox agora propaga o padding configurado para seu ToggleButton interno, garantindo respiro à esquerda do texto selecionado.
+- O espaço entre o marcador e o texto dos checkboxes passou a ser aplicado diretamente no conteúdo, mantendo 13 DIP estáveis sem depender do layout interno de `BulletDecorator`.
+- O modo detalhado agora adota a altura total permitida depois que os dados são aplicados, limitada pelo conteúdo e pela área de trabalho atual, reposicionando-se apenas quando necessário para continuar visível.
+- As superfícies compactas do gauge, contador e lista de agents receberam elevação curta e sutil, sem bordas decorativas ou recorte de sombra.
+- Modelo e effort agora ficam imediatamente ao lado do tipo do agent, com espaço curto consistente e truncamento seguro.
+
 ## [0.11.0] - 2026-08-14
 
 ### Added

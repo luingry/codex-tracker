@@ -53,7 +53,7 @@ public partial class MainWindow : Window
     private const double CompactAspectRatio = WidgetSizePolicy.CompactAspectRatio;
     private const double CompactMinWidth = WidgetSizePolicy.CompactMinWidth;
     private const double CompactMaxWidth = WidgetSizePolicy.CompactMaxWidth;
-    private const double CompactAgentIndicatorHeight = 19d;
+    private const double CompactAgentIndicatorHeight = 24d;
     private const double ResizeBorderThickness = 6d;
     private const double DetailedVerticalMargin = 24d;
     private double _detailedContentMaxHeight = WidgetSizePolicy.DetailedMaxHeight;
@@ -846,13 +846,19 @@ public partial class MainWindow : Window
     {
         if (CurrentVisualMode != WidgetVisualMode.Detailed) return;
 
-        var contentMaxHeight = WidgetSizePolicy.DetailedMaxHeightForContent(
-            DetailedContent.DesiredSize.Height + DetailedVerticalMargin);
+        var workArea = GetResizeWorkArea();
+        var contentMaxHeight = WidgetSizePolicy.DetailedHeightForContent(
+            DetailedContent.DesiredSize.Height + DetailedVerticalMargin, workArea.Height);
+        // A user-resized detailed window must remain at the chosen height. Only a
+        // content change (for example, analytics arriving) is allowed to reclaim
+        // the full safe height automatically.
         if (Math.Abs(contentMaxHeight - _detailedContentMaxHeight) < .5d) return;
 
         _detailedContentMaxHeight = contentMaxHeight;
+        MinHeight = Math.Min(WidgetSizePolicy.DetailedMinHeight, contentMaxHeight);
         MaxHeight = contentMaxHeight;
-        if (Height > contentMaxHeight) Height = contentMaxHeight;
+        Height = contentMaxHeight;
+        Top = Math.Max(workArea.Top, Math.Min(Top, workArea.Top + workArea.Height - Height));
     }
     private void SetCompactSize(double width)
     {

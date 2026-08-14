@@ -45,9 +45,11 @@
             <Grid Width="{Binding ActualHeight, ElementName=CompactGaugeHost, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=Gauge}"
                   Height="{Binding ActualHeight, ElementName=CompactGaugeHost, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=Gauge}"
                   HorizontalAlignment="Center" VerticalAlignment="Center">
-              <Ellipse Width="{Binding ActualHeight, ElementName=CompactGaugeHost, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=Background}"
+              <Ellipse x:Name="CompactGaugeSurface" Width="{Binding ActualHeight, ElementName=CompactGaugeHost, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=Background}"
                        Height="{Binding ActualHeight, ElementName=CompactGaugeHost, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=Background}"
-                       Fill="{DynamicResource GlassSurface}" />
+                       Fill="{DynamicResource GlassSurface}">
+                <Ellipse.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Opacity=".30" Color="#151A18" /></Ellipse.Effect>
+              </Ellipse>
               <local:CircularQuotaGauge x:Name="CompactQuotaGauge" AutomationProperties.Name="{DynamicResource Loc.WeeklyQuotaIndicator}" Value="{Binding RemainingPercent}"
                                        TrackBrush="{DynamicResource GaugeTrack}" ProgressBrush="{DynamicResource Accent}" StrokeThickness="3"
                                        IsWorking="{Binding IsWorkAnimationEnabled}" />
@@ -55,12 +57,13 @@
                          Foreground="{DynamicResource Ink}" HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Grid>
           </Grid>
-          <Button x:Name="AgentIndicatorButton" Width="20" Height="20" Padding="0" Margin="0,-1,0,0"
+          <Button x:Name="AgentIndicatorButton" Width="20" Height="20" Padding="0" Margin="0,-1,0,5"
                   Visibility="{Binding HasActiveAgents, Converter={StaticResource BooleanToVisibility}}"
                   Click="ToggleAgentList" ToolTip="{DynamicResource Loc.AgentsWorkingTooltip}" AutomationProperties.Name="{DynamicResource Loc.ShowWorkingAgents}">
             <Button.Template>
               <ControlTemplate TargetType="Button">
                 <Border x:Name="AgentIndicatorSurface" Background="#2D2D2D" CornerRadius="10">
+                  <Border.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Opacity=".30" Color="#151A18" /></Border.Effect>
                   <Grid>
                     <TextBlock x:Name="AgentCount" Text="{Binding ActiveAgentCount}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="11.5" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     <Path x:Name="AgentArrow" Width="9" Height="6" Data="M1,1L5,5L9,1" Stretch="Uniform" Stroke="White" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
@@ -81,12 +84,13 @@
             </Button.Template>
           </Button>
           <Popup x:Name="AgentListPopup" Placement="Bottom" PlacementTarget="{Binding ElementName=AgentIndicatorButton}"
-                 AllowsTransparency="True" StaysOpen="True" PopupAnimation="None" IsOpen="{Binding IsAgentListOpen}" HorizontalOffset="-134" VerticalOffset="5" Opened="AgentListPopupOpened">
-            <Border x:Name="AgentListWrapper" Width="288" MaxHeight="350" Padding="0,8" CornerRadius="12" Background="{DynamicResource DetailedSurface}" BorderThickness="0" RenderTransformOrigin="0.5,0">
-              <Border.RenderTransform><TransformGroup><ScaleTransform x:Name="AgentListWrapperScale" /><TranslateTransform x:Name="AgentListWrapperTranslate" /></TransformGroup></Border.RenderTransform>
-              <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="5" Opacity=".24" Color="#151A18" /></Border.Effect>
-              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <ItemsControl ItemsSource="{Binding ActiveAgents}">
+                 AllowsTransparency="True" StaysOpen="True" PopupAnimation="None" IsOpen="{Binding IsAgentListOpen}" HorizontalOffset="-149" VerticalOffset="-10" Opened="AgentListPopupOpened">
+            <Border Padding="15" Background="Transparent">
+              <Border x:Name="AgentListWrapper" Width="288" MaxHeight="350" Padding="0,8" CornerRadius="12" Background="{DynamicResource DetailedSurface}" BorderThickness="0" RenderTransformOrigin="0.5,0">
+                <Border.RenderTransform><TransformGroup><ScaleTransform x:Name="AgentListWrapperScale" /><TranslateTransform x:Name="AgentListWrapperTranslate" /></TransformGroup></Border.RenderTransform>
+                <Border.Effect><DropShadowEffect BlurRadius="12" ShadowDepth="3" Opacity=".28" Color="#151A18" /></Border.Effect>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <ItemsControl ItemsSource="{Binding ActiveAgents}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
                       <Button x:Name="AgentRow" Margin="0,2" Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
@@ -113,9 +117,9 @@
                           <Grid>
                             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                             <Grid>
-                              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="118" /></Grid.ColumnDefinitions>
-                              <TextBlock x:Name="KindLabel" Text="{Binding Type}" FontSize="9.2" FontWeight="SemiBold" Foreground="{DynamicResource Accent}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
-                              <TextBlock Grid.Column="1" Text="{Binding ModelAndEffort}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9.2" Foreground="{DynamicResource AgentMetadataAccent}" TextTrimming="CharacterEllipsis" TextAlignment="Right" HorizontalAlignment="Stretch" />
+                              <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                              <TextBlock x:Name="KindLabel" Text="{Binding Type}" MaxWidth="58" FontSize="9.2" FontWeight="SemiBold" Foreground="{DynamicResource Accent}" TextTrimming="CharacterEllipsis" Margin="0,0,6,0" />
+                              <TextBlock Grid.Column="1" Text="{Binding ModelAndEffort}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9.2" Foreground="{DynamicResource AgentMetadataAccent}" TextTrimming="CharacterEllipsis" HorizontalAlignment="Left" />
                             </Grid>
                             <TextBlock Grid.Row="1" Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" TextTrimming="CharacterEllipsis" Margin="0,2.3,0,0" />
                             <Grid Grid.Row="2" Margin="0,2.3,0,0">
@@ -164,8 +168,9 @@
                       </DataTemplate.Triggers>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
-                </ItemsControl>
-              </ScrollViewer>
+                  </ItemsControl>
+                </ScrollViewer>
+              </Border>
             </Border>
           </Popup>
         </StackPanel>
