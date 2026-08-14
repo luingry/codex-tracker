@@ -1,52 +1,50 @@
 # Codex Tracker
 
-Widget nativo para Windows que acompanha a quota semanal do Codex e transforma o histórico local do CLI em métricas simples de uso.
+A native Windows widget for Codex weekly quota, local usage analytics, and live agent activity.
 
-![Widget do Codex Tracker em modo detalhado](assets/screenshots/codex-tracker-widget.png)
+<p align="center">
+  <img src="assets/screenshots/codex-tracker-detailed.png" alt="Codex Tracker detailed widget showing weekly quota, analytics, model ranking, and daily usage" width="46%" />
+  <img src="assets/screenshots/codex-tracker-agents.png" alt="Codex Tracker compact widget showing the active agents and subagents list" width="46%" />
+</p>
 
-## O que mostra
+<p align="center"><sub>Screenshots show the v0.11.4 interface; the latest release may be newer.</sub></p>
 
-- Percentual semanal restante, reset e previsão de esgotamento.
-- Tokens e custo estimado para hoje, a janela semanal vigente e o mês.
-- Ranking de modelos e gráfico diário do mês, com tooltip por dia.
-- Modos compacto e detalhado, temas claro/escuro, moeda BRL/USD, always-on-top, arraste e redimensionamento.
+## What it does
 
-## Instalar ou executar
+- Compact and detailed widget modes for an at-a-glance or full view.
+- Weekly Codex quota, reset countdown, and exhaustion-risk forecast.
+- Local token and estimated API-equivalent cost analytics for today, the active quota week, and the current month.
+- Model ranking and a daily usage chart.
+- Live agents and subagents with their current status, model, reasoning effort, duration, hierarchy, and a deep link to the related Codex chat.
+- Light/dark themes, user-selected accent color, BRL/USD display, settings, tray controls, persistent placement, and always-on-top preference.
+- Full interface support for **Portuguese (Brazil)** (`pt-BR`, default) and **English (United States)** (`en-US`).
 
-Requisitos: Windows 10/11, Codex CLI autenticado e .NET 8 SDK apenas para desenvolvimento.
+## Requirements
 
-```powershell
-git clone https://github.com/luingry/codex-tracker.git
-cd codex-tracker
-.\scripts\finalize-build.ps1
-```
+- Windows 10 22H2 or newer, or Windows 11.
+- An authenticated Codex CLI installation. Codex Tracker reads the official quota through the Codex CLI app-server.
+- The released app targets **.NET Framework 4.8** (`net48`).
 
-O instalador gerado fica em `artifacts\CodexTracker-latest.exe`. Para executar sem empacotar:
+## Install
 
-```powershell
-dotnet run --project .\src\CodexTracker\CodexTracker.csproj
-```
+Download and run the installer from the [latest release](https://github.com/luingry/codex-tracker/releases/latest). The installer preserves your local settings and the application detects `codex.exe` automatically when possible.
 
-O app detecta o `codex.exe` no PATH ou na instalação do Codex. Caso necessário, escolha o caminho nas configurações do widget.
+## Data and privacy
 
-## Como os dados são calculados
+The weekly quota comes from the local Codex CLI app-server. Tokens, model ranking, charts, and costs are reconstructed from the local Codex history (`~/.codex`). No account history is uploaded by the widget.
 
-A quota semanal vem do `codex app-server`, portanto acompanha o valor exibido pelo próprio Codex. Os tokens, ranking, gráfico e custos são calculados apenas a partir dos JSONL locais em `~/.codex`; representam a atividade disponível neste computador, não uma fatura nem um uso consolidado de outros dispositivos.
+Local-history analytics cover only the Codex data available on this Windows machine; they are not a cross-device total. Cost values are **estimated API equivalents**, not real Codex billing or an invoice.
 
-## Desenvolvimento
+## Development
 
 ```powershell
 dotnet build .\CodexTracker.sln
 dotnet run --project .\tests\CodexTracker.Tests\CodexTracker.Tests.csproj
+.\scripts\finalize-build.ps1
 ```
 
-Após toda alteração funcional, gere o instalador com `scripts\finalize-build.ps1`.
-Antes de concluir uma alteração, atualize `VERSION` conforme SemVer e registre as mudanças em [CHANGELOG.md](CHANGELOG.md).
+The generated installer is `artifacts\CodexTracker-latest.exe`.
 
-## Releases
-
-A push to `main` that changes `VERSION` or `CHANGELOG.md` runs the release workflow. It builds the Windows installer, publishes tag `v<version>` with the matching changelog section, attaches the setup to the release and workflow artifacts, then removes all older releases and their tags.
-
-## Licença
+## License
 
 [MIT](LICENSE).

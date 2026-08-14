@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.11.5] - 2026-08-14
+
+### Changed
+
+- Rewrote the README in English with current product capabilities, privacy boundaries, supported languages, development steps, and stable detailed/agents screenshots.
+
 ## [0.11.4] - 2026-08-14
 
 ### Fixed
