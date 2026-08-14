@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.11.9] - 2026-08-14
+
+### Fixed
+
+- Local analytics now optionally reads the local Codex SQLite thread-model index in read-only mode to attribute snapshots that precede rollout model metadata. JSONL model changes remain temporal overrides; SQLite WAL updates invalidate the index, while transient database failures retain the last valid mapping.
+- The compact active-agent indicator now uses a clipped internal circular glow that softly pulses in scale and opacity instead of rotating; it remains disabled when reduced motion is enabled.
+
+## [0.11.8] - 2026-08-14
+
+### Fixed
+
+- Local usage analytics now reads `thread_settings_applied` model changes from rollout events, attributing only subsequent token deltas to the selected model while retaining earlier or model-provider-only snapshots as unknown. The ranking presents the remaining internal `unknown` bucket as a localized unregistered-model label without changing its tokens, cost state, or underlying key.
+
+## [0.11.7] - 2026-08-14
+
+### Fixed
+
+- A lista de agents agora reconhece `turn_context` tanto no campo raiz quanto em `payload.type`, incluindo contextos anexados depois do cache inicial, para substituir metadados `unknown` pelo modelo e effort registrados. Rollouts ativos com mtime estagnado continuam visíveis por data local e crescimento incremental, enquanto entradas inativas do cache expiram.
+
 ## [0.11.6] - 2026-08-14
 
 ### Added

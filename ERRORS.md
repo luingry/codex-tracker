@@ -1,5 +1,26 @@
 # Erros e solucoes conhecidas
 
+## Histórico local perdia o modelo antes do primeiro contexto do rollout
+
+- **Sintoma:** tokens podiam permanecer no bucket `unknown` quando o JSONL não incluía `turn_context` antes do primeiro snapshot, embora o estado local do Codex registrasse o modelo da thread.
+- **Causa:** analytics usava somente metadados do JSONL para o modelo temporal e não consultava a tabela local `threads(id, model)`.
+- **Solucao:** um índice SQLite opcional, somente leitura e com timeout curto inicializa o modelo da thread antes do primeiro snapshot; `turn_context` e `thread_settings_applied` continuam sobrescrevendo-o temporalmente. A assinatura inclui banco principal e WAL; falhas transitórias preservam o último mapa válido, e alterações de fallback reconstroem somente os rollouts afetados.
+- **Prevencao:** manter fixtures com modelo SQLite antes do primeiro snapshot, troca posterior no rollout, thread sem modelo, banco ausente/corrompido/bloqueado, atualização em WAL e invalidação seletiva do cache.
+
+## Ranking local atribuía tokens a unknown após trocar o modelo
+
+- **Sintoma:** o ranking semanal podia concentrar grande volume em `unknown`, embora a conversa tivesse aplicado um modelo antes dos snapshots seguintes.
+- **Causa:** `LocalUsageAnalyticsService` atualizava o modelo temporal somente para `turn_context`, ignorando `event_msg.payload.type=thread_settings_applied` e `payload.thread_settings.model`.
+- **Solucao:** `thread_settings_applied` agora atualiza o modelo corrente antes do próximo `token_count`; snapshots anteriores não são reatribuídos, e `model_provider` isolado continua sem inferência.
+- **Prevencao:** para toda nova fonte de modelo no rollout, testar a ordem evento-configuracao -> snapshot, snapshot anterior, troca de modelo e eventos auxiliares que não podem atribuir modelo.
+
+## Sessao ativa sumia quando o mtime do JSONL ficava estagnado
+
+- **Sintoma:** o widget podia mostrar zero agents para uma sessao com `task_started` e eventos recentes, embora o arquivo JSONL continuasse crescendo.
+- **Causa:** `AgentActivityService` filtrava arquivos exclusivamente por `FileInfo.LastWriteTimeUtc` antes de parsear; em alguns rollouts o timestamp de escrita permanecia no inicio da sessao.
+- **Solucao:** rollouts de hoje ou ontem no calendario local sao considerados mesmo com mtime antigo, e arquivos ja cacheados continuam sendo verificados pela assinatura de tamanho enquanto permanecem ativos ou mudam. O parser incremental processa apenas os bytes novos e descarta cache inativo inalterado fora dessa janela.
+- **Prevencao:** nao trate mtime como a unica prova de atividade em streams append-only; cubra um mtime estagnado com timestamps JSON recentes e crescimento do arquivo.
+
 ## Abertura detalhada concorria leitura fria dos rollouts com a quota oficial
 
 - **Sintoma:** ao abrir diretamente no modo detalhado, se analytics terminasse antes do primeiro snapshot de quota, o painel podia permanecer sem dados locais até a próxima atualização periódica.

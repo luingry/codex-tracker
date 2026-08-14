@@ -1,6 +1,7 @@
 using System.IO;
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using CodexTracker.Core;
 using CodexTracker;
 
@@ -140,7 +141,7 @@ Assert(WidgetPlacementPolicy.Restore(removedMonitorBounds, dualMonitorWorkAreas)
 var rankingNow = DateTimeOffset.Now;
 var rankingCycleEnd = new DateTimeOffset(2026, 8, 16, 12, 0, 0, TimeSpan.Zero);
 var rankingCycleStart = rankingCycleEnd.AddMinutes(-10080);
-var rankingAnalytics = new UsageAnalytics(0, 143, 0, 0, 0, [new ModelUsage("month-model", 99, 9.9m, true), new ModelUsage("no-tariff-model", 44, 0, false)], UsdBrl: 5m, ModelTimeline:
+var rankingAnalytics = new UsageAnalytics(0, 143, 0, 0, 0, [new ModelUsage("month-model", 99, 9.9m, true), new ModelUsage("no-tariff-model", 44, 0, false), new ModelUsage("unknown", 33, 0, false), new ModelUsage("unknown-model", 22, 0, false)], UsdBrl: 5m, ModelTimeline:
 [
     new(rankingNow.AddMinutes(-1), "day-model", 11, 1.25m, true),
     new(rankingCycleStart.AddMinutes(1), "cycle-model", 50, 2.5m, true),
@@ -149,11 +150,12 @@ var rankingAnalytics = new UsageAnalytics(0, 143, 0, 0, 0, [new ModelUsage("mont
 var rankingViewModel = new MainViewModel();
 rankingViewModel.Apply(new RateLimitSnapshot([new("codex:primary", "Weekly limit", 16, rankingCycleEnd, 10080)], null, null, null, rankingNow), rankingAnalytics);
 Assert(rankingViewModel.Ranking.First().Model == "month-model" && rankingViewModel.Ranking.First().SecondaryText == "R$ 49,50" && rankingViewModel.Ranking.Single(row => row.Model == "no-tariff-model").SecondaryText == "sem tarifa", "monthly ranking shows the priced model cost converted with analytics USD/BRL and preserves the localized no-tariff state for unpriced models in the same secondary line");
+Assert(rankingViewModel.Ranking.All(row => row.Model != "unknown") && rankingViewModel.Ranking.Single(row => row.Model == "Modelo não registrado").Tokens == "33" && rankingViewModel.Ranking.Single(row => row.Model == "unknown-model").Tokens == "22", "ranking localizes only the internal unknown bucket without hiding tokens or renaming literal model names");
 rankingViewModel.SetCurrency("USD");
 Assert(rankingViewModel.Ranking.First().SecondaryText == "US$ 9,90", "monthly ranking refreshes priced costs when the selected currency changes to USD");
 LocalizationManager.Apply("en-US");
 rankingViewModel.RefreshLocalization();
-Assert(rankingViewModel.Ranking.First().SecondaryText == "US$ 9.90" && rankingViewModel.Ranking.Single(row => row.Model == "no-tariff-model").SecondaryText == "no tariff", "ranking refreshes cost formatting and unpriced text when the interface language changes to en-US");
+Assert(rankingViewModel.Ranking.First().SecondaryText == "US$ 9.90" && rankingViewModel.Ranking.Single(row => row.Model == "no-tariff-model").SecondaryText == "no tariff" && rankingViewModel.Ranking.Single(row => row.Model == "Model not recorded").Tokens == "33" && rankingViewModel.Ranking.Any(row => row.Model == "unknown-model"), "ranking refreshes cost formatting, unpriced text and the internal unknown label when the interface language changes to en-US without renaming literal model names");
 rankingViewModel.SetCurrency("BRL");
 Assert(rankingViewModel.Ranking.First().SecondaryText == "R$ 49.50", "ranking refreshes BRL cost formatting using the active en-US culture");
 rankingViewModel.IsRankingDay = true;
@@ -218,7 +220,7 @@ var indicatorEnd = mainWindowXaml.IndexOf("<Popup x:Name=\"AgentListPopup\"", in
 var indicatorTemplate = indicatorStart >= 0 && indicatorEnd > indicatorStart ? mainWindowXaml.Substring(indicatorStart, indicatorEnd - indicatorStart) : string.Empty;
 Assert(indicatorTemplate.Contains("<Trigger Property=\"IsMouseOver\" Value=\"True\">", StringComparison.Ordinal) && indicatorTemplate.Contains("TargetName=\"AgentCount\" Property=\"Visibility\" Value=\"Collapsed\"", StringComparison.Ordinal) && indicatorTemplate.Contains("TargetName=\"AgentArrow\" Property=\"Visibility\" Value=\"Visible\"", StringComparison.Ordinal) && !indicatorTemplate.Contains("<MultiDataTrigger>", StringComparison.Ordinal), "agent indicator hover has one direct IsMouseOver trigger that swaps the count for the chevron independently of open state");
 Assert(indicatorTemplate.Contains("x:Name=\"AgentIndicatorSurface\" Background=\"#2D2D2D\"", StringComparison.Ordinal) && indicatorTemplate.Contains("<Border.Effect><DropShadowEffect BlurRadius=\"5\" ShadowDepth=\"1\" Opacity=\".30\" Color=\"#151A18\" /></Border.Effect>", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"CompactGaugeSurface\"", StringComparison.Ordinal) && mainWindowXaml.Contains("<Ellipse.Effect><DropShadowEffect BlurRadius=\"5\" ShadowDepth=\"1\" Opacity=\".30\" Color=\"#151A18\" /></Ellipse.Effect>", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"AgentIndicatorButton\" Width=\"20\" Height=\"20\" Padding=\"0\" Margin=\"0,-1,0,5\"", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"WindowSurface\" CornerRadius=\"12\" ClipToBounds=\"True\"", StringComparison.Ordinal) && mainWindowSource.Contains("private const double CompactAgentIndicatorHeight = 24d;", StringComparison.Ordinal), "compact gauge and dark agent indicator use coherent subtle shadows with explicit lower space while the rounded window keeps its intended clipping");
-Assert(indicatorTemplate.Contains("x:Name=\"AgentWorkSpinner\" Data=\"M10,1 A9,9 0 0 1 18.83,8.24\" Stroke=\"#FFFFFF\" StrokeThickness=\"1.6\"", StringComparison.Ordinal) && indicatorTemplate.Contains("Opacity=\".42\" Visibility=\"Collapsed\"", StringComparison.Ordinal) && indicatorTemplate.Contains("<BlurEffect Radius=\"4\" />", StringComparison.Ordinal) && indicatorTemplate.Contains("<DataTrigger Binding=\"{Binding IsWorkAnimationEnabled}\" Value=\"True\">", StringComparison.Ordinal) && indicatorTemplate.Contains("x:Name=\"AgentWorkSpinnerStoryboard\"", StringComparison.Ordinal) && indicatorTemplate.Contains("Storyboard.TargetName=\"AgentWorkSpinnerRotation\" Storyboard.TargetProperty=\"Angle\" To=\"-360\" Duration=\"0:0:1.10\"", StringComparison.Ordinal) && indicatorTemplate.Contains("<StopStoryboard BeginStoryboardName=\"AgentWorkSpinnerStoryboard\" />", StringComparison.Ordinal), "active agents display a short blurred 42-percent white glow arc which rotates counterclockwise only while work animation is allowed and stops cleanly for reduced motion");
+Assert(indicatorTemplate.Contains("x:Name=\"AgentIndicatorSurface\" Background=\"#2D2D2D\" CornerRadius=\"10\" ClipToBounds=\"True\"", StringComparison.Ordinal) && indicatorTemplate.Contains("<Ellipse x:Name=\"AgentWorkGlow\" Width=\"18\" Height=\"18\" Fill=\"#FFFFFF\" Opacity=\".10\" Visibility=\"Collapsed\" IsHitTestVisible=\"False\"", StringComparison.Ordinal) && indicatorTemplate.Contains("<BlurEffect Radius=\"4\" />", StringComparison.Ordinal) && indicatorTemplate.Contains("<ScaleTransform x:Name=\"AgentWorkGlowScale\" ScaleX=\".55\" ScaleY=\".55\" />", StringComparison.Ordinal) && indicatorTemplate.Contains("<DataTrigger Binding=\"{Binding IsWorkAnimationEnabled}\" Value=\"True\">", StringComparison.Ordinal) && indicatorTemplate.Contains("x:Name=\"AgentWorkGlowStoryboard\"", StringComparison.Ordinal) && indicatorTemplate.Contains("Storyboard.TargetName=\"AgentWorkGlowScale\" Storyboard.TargetProperty=\"ScaleX\" From=\".55\" To=\"1.0\" Duration=\"0:0:1.40\" AutoReverse=\"True\"", StringComparison.Ordinal) && indicatorTemplate.Contains("Storyboard.TargetName=\"AgentWorkGlowScale\" Storyboard.TargetProperty=\"ScaleY\" From=\".55\" To=\"1.0\" Duration=\"0:0:1.40\" AutoReverse=\"True\"", StringComparison.Ordinal) && indicatorTemplate.Contains("Storyboard.TargetName=\"AgentWorkGlow\" Storyboard.TargetProperty=\"Opacity\" From=\".10\" To=\".34\" Duration=\"0:0:1.40\" AutoReverse=\"True\"", StringComparison.Ordinal) && indicatorTemplate.Contains("<Storyboard RepeatBehavior=\"Forever\">", StringComparison.Ordinal) && !indicatorTemplate.Contains("AgentWorkSpinner", StringComparison.Ordinal) && !indicatorTemplate.Contains("M10,1 A9,9", StringComparison.Ordinal) && !indicatorTemplate.Contains("RotateTransform", StringComparison.Ordinal) && !indicatorTemplate.Contains("Storyboard.TargetProperty=\"Angle\"", StringComparison.Ordinal) && indicatorTemplate.Contains("<StopStoryboard BeginStoryboardName=\"AgentWorkGlowStoryboard\" />", StringComparison.Ordinal), "active agents display a clipped internal circular glow that smoothly pulses scale and opacity only while work animation is allowed and stops cleanly for reduced motion");
 var agentListStart = mainWindowXaml.IndexOf("<Popup x:Name=\"AgentListPopup\"", StringComparison.Ordinal);
 var agentListEnd = mainWindowXaml.IndexOf("</Popup>", agentListStart, StringComparison.Ordinal);
 var agentListTemplate = agentListStart >= 0 && agentListEnd > agentListStart ? mainWindowXaml.Substring(agentListStart, agentListEnd - agentListStart) : string.Empty;
@@ -535,6 +537,79 @@ File.WriteAllText(Path.Combine(analyticsRoot, "switch.jsonl"), """
 """);
 analytics = new LocalUsageAnalyticsService().Read(5.5m, analyticsRoot);
 Assert(analytics.Models.Any(x => x.Model == "unknown-model" && !x.Priced), "unknown model remains visible and unpriced");
+var threadSettingsRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-thread-settings-" + Guid.NewGuid());
+Directory.CreateDirectory(threadSettingsRoot);
+File.WriteAllText(Path.Combine(threadSettingsRoot, "settings.jsonl"), """
+{"timestamp":"2026-08-12T10:00:00Z","type":"event_msg","payload":{"type":"model_provider","model":"gpt-5.6-sol"}}
+{"timestamp":"2026-08-12T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"total_tokens":10}}}}
+{"timestamp":"2026-08-12T10:00:02Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"gpt-5.6-sol"}}}
+{"timestamp":"2026-08-12T10:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":30,"total_tokens":30}}}}
+{"timestamp":"2026-08-12T10:00:04Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"gpt-5.6-terra"}}}
+{"timestamp":"2026-08-12T10:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":45,"total_tokens":45}}}}
+""");
+var threadSettingsUsage = new LocalUsageAnalyticsService(() => analyticsNow).Read(5.5m, threadSettingsRoot);
+Assert(threadSettingsUsage.Models.Any(x => x.Model == "unknown" && x.Tokens == 10) &&
+       threadSettingsUsage.Models.Any(x => x.Model == "gpt-5.6-sol" && x.Tokens == 20) &&
+       threadSettingsUsage.Models.Any(x => x.Model == "gpt-5.6-terra" && x.Tokens == 15),
+       "thread settings apply model attribution only to subsequent snapshots while model_provider alone remains unknown");
+Directory.Delete(threadSettingsRoot, true);
+var sqliteFallbackRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-sqlite-fallback-" + Guid.NewGuid());
+Directory.CreateDirectory(sqliteFallbackRoot);
+var sqliteFallbackPath = Path.Combine(sqliteFallbackRoot, "fallback.jsonl");
+File.WriteAllText(sqliteFallbackPath, """
+{"timestamp":"2026-08-12T10:00:00Z","type":"session_meta","payload":{"session_id":"sqlite-session","id":"sqlite-thread"}}
+{"timestamp":"2026-08-12T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"total_tokens":10}}}}
+{"timestamp":"2026-08-12T10:00:02Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"gpt-5.6-terra"}}}
+{"timestamp":"2026-08-12T10:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":25,"total_tokens":25}}}}
+""" + Environment.NewLine);
+File.WriteAllText(Path.Combine(sqliteFallbackRoot, "unmapped.jsonl"), """
+{"timestamp":"2026-08-12T10:00:00Z","type":"session_meta","payload":{"session_id":"unmapped-session","id":"unmapped-thread"}}
+{"timestamp":"2026-08-12T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":7,"total_tokens":7}}}}
+""" + Environment.NewLine);
+var sqliteFallbackDb = Path.Combine(sqliteFallbackRoot, "state.sqlite");
+using (var connection = new SqliteConnection($"Data Source={sqliteFallbackDb};Pooling=False"))
+{
+    connection.Open();
+    using var command = connection.CreateCommand();
+    command.CommandText = "PRAGMA journal_mode=WAL";
+    command.ExecuteScalar();
+    command.CommandText = "CREATE TABLE threads (id TEXT PRIMARY KEY, model TEXT, reasoning_effort TEXT); INSERT INTO threads (id, model, reasoning_effort) VALUES ('sqlite-thread', 'gpt-5.6-sol', 'medium');";
+    command.ExecuteNonQuery();
+}
+var sqliteFallbackUsage = new LocalUsageAnalyticsService(() => analyticsNow, stateDatabasePath: sqliteFallbackDb).Read(5.5m, sqliteFallbackRoot);
+Assert(sqliteFallbackUsage.Models.Any(x => x.Model == "gpt-5.6-sol" && x.Tokens == 10) && sqliteFallbackUsage.Models.Any(x => x.Model == "gpt-5.6-terra" && x.Tokens == 15) && sqliteFallbackUsage.Models.Any(x => x.Model == "unknown" && x.Tokens == 7), "sqlite thread model seeds attribution before the first snapshot, later rollout settings remain temporal overrides, and missing thread models remain unknown");
+var sqliteFallbackService = new LocalUsageAnalyticsService(() => analyticsNow, stateDatabasePath: sqliteFallbackDb);
+_ = sqliteFallbackService.Read(5.5m, sqliteFallbackRoot);
+var sqliteFallbackWal = sqliteFallbackDb + "-wal";
+using (var connection = new SqliteConnection($"Data Source={sqliteFallbackDb};Pooling=False"))
+{
+    connection.Open();
+    using var command = connection.CreateCommand();
+    command.CommandText = "UPDATE threads SET model = 'gpt-5.6-luna' WHERE id = 'sqlite-thread'";
+    command.ExecuteNonQuery();
+    Assert(File.Exists(sqliteFallbackWal), "sqlite WAL is present after a journal-mode update");
+    File.SetLastWriteTimeUtc(sqliteFallbackWal, DateTime.UtcNow.AddSeconds(1));
+    sqliteFallbackUsage = sqliteFallbackService.Read(5.5m, sqliteFallbackRoot);
+}
+Assert(sqliteFallbackUsage.Models.Any(x => x.Model == "gpt-5.6-luna" && x.Tokens == 10) && sqliteFallbackUsage.Models.Any(x => x.Model == "gpt-5.6-terra" && x.Tokens == 15) && sqliteFallbackService.FilesRebuiltLastRead == 1, "changed sqlite fallback rebuilds only its affected rollout while later temporal settings remain authoritative");
+var missingSqliteUsage = new LocalUsageAnalyticsService(() => analyticsNow, stateDatabasePath: Path.Combine(sqliteFallbackRoot, "missing.sqlite")).Read(5.5m, sqliteFallbackRoot);
+Assert(missingSqliteUsage.MonthTokens == 32, "missing sqlite fallback leaves local analytics available");
+var corruptSqlitePath = Path.Combine(sqliteFallbackRoot, "corrupt.sqlite");
+File.WriteAllText(corruptSqlitePath, "not a sqlite database");
+var corruptSqliteUsage = new LocalUsageAnalyticsService(() => analyticsNow, stateDatabasePath: corruptSqlitePath).Read(5.5m, sqliteFallbackRoot);
+Assert(corruptSqliteUsage.MonthTokens == 32, "corrupt sqlite fallback leaves local analytics available");
+using (var lockConnection = new SqliteConnection($"Data Source={sqliteFallbackDb};Pooling=False"))
+{
+    lockConnection.Open();
+    using (var lockCommand = lockConnection.CreateCommand()) { lockCommand.CommandText = "BEGIN EXCLUSIVE"; lockCommand.ExecuteNonQuery(); }
+    File.SetLastWriteTimeUtc(sqliteFallbackWal, DateTime.UtcNow.AddSeconds(2));
+    var lockedSqliteUsage = sqliteFallbackService.Read(5.5m, sqliteFallbackRoot);
+    Assert(lockedSqliteUsage.Models.Any(x => x.Model == "gpt-5.6-luna" && x.Tokens == 10) && sqliteFallbackService.FilesRebuiltLastRead == 0, "locked sqlite fallback preserves the last valid map without rebuilding rollouts as unknown");
+    using var rollbackCommand = lockConnection.CreateCommand();
+    rollbackCommand.CommandText = "ROLLBACK";
+    rollbackCommand.ExecuteNonQuery();
+}
+Directory.Delete(sqliteFallbackRoot, true);
 Directory.Delete(analyticsRoot, true);
 var parallelAnalyticsRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-parallel-analytics-" + Guid.NewGuid());
 Directory.CreateDirectory(parallelAnalyticsRoot);
@@ -713,6 +788,48 @@ Assert(activeRoot.Type == "Agent" && activeRoot.HierarchyDepth == 0 && activeRoo
 var activeSubagent = activeAgents.Single(x => x.ThreadId == "sub-1");
 Assert(activeSubagent.Type == "Subagent" && activeSubagent.HierarchyDepth == 1 && activeSubagent.Title == "ui review" && activeSubagent.ParentThreadId == "root-1" && activeSubagent.Model == "gpt-5.6-luna" && activeSubagent.Effort == "low", "subagent activity uses its own id, depth and safe path fallback title");
 Assert(activeAgents.Single(x => x.ThreadId == "grand-1").HierarchyDepth == 2 && activeAgents.Single(x => x.ThreadId == "root-b").HierarchyDepth == 0 && activeAgents.Single(x => x.ThreadId == "orphan").HierarchyDepth == 0, "grandchildren nest while roots with missing parents remain visual roots");
+Assert(activeAgents.Single(x => x.ThreadId == "root-b").Model == "unknown" && activeAgents.Single(x => x.ThreadId == "root-b").Effort == "unknown", "missing turn context initially uses unknown metadata");
+File.AppendAllText(rootBActivityPath, "\n{\"timestamp\":\"2026-08-14T13:29:57Z\",\"payload\":{\"type\":\"turn_context\",\"model\":\"gpt-5.6-sol\",\"effort\":\"high\"}}\n");
+File.SetLastWriteTimeUtc(rootBActivityPath, activityNow.UtcDateTime.AddSeconds(1));
+var appendedContextAgent = activityService.Read(null, activityRoot).Single(x => x.ThreadId == "root-b");
+Assert(appendedContextAgent.Model == "gpt-5.6-sol" && appendedContextAgent.Effort == "high", "payload turn_context append replaces unknown metadata through the incremental cache");
+var stagnantMtimeActivityPath = Path.Combine(activityRoot, "rollout-2026-08-14T13-29-00-stagnant.jsonl");
+File.WriteAllText(stagnantMtimeActivityPath, """
+{"timestamp":"2026-08-14T13:29:00Z","type":"session_meta","payload":{"session_id":"stagnant","id":"stagnant","thread_source":"user"}}
+{"timestamp":"2026-08-14T13:29:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"stagnant-turn"}}
+{"timestamp":"2026-08-14T13:29:02Z","payload":{"type":"turn_context","model":"gpt-5.6-terra","effort":"medium"}}
+""");
+File.SetLastWriteTimeUtc(stagnantMtimeActivityPath, activityNow.AddMinutes(-10).UtcDateTime);
+var stagnantMtimeService = new AgentActivityService(() => activityNow);
+var stagnantMtimeAgent = stagnantMtimeService.Read(null, activityRoot).Single(x => x.ThreadId == "stagnant");
+Assert(stagnantMtimeAgent.Model == "gpt-5.6-terra" && stagnantMtimeAgent.Effort == "medium", "a current rollout with stale filesystem mtime is discovered from its session date and payload turn context");
+File.AppendAllText(stagnantMtimeActivityPath, "\n{\"timestamp\":\"2026-08-14T13:29:59Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_reasoning\",\"text\":\"Evento incremental\"}}\n");
+File.SetLastWriteTimeUtc(stagnantMtimeActivityPath, activityNow.AddMinutes(-10).UtcDateTime);
+stagnantMtimeAgent = stagnantMtimeService.Read(null, activityRoot).Single(x => x.ThreadId == "stagnant");
+Assert(stagnantMtimeAgent.Status == "Evento incremental" && stagnantMtimeAgent.Model == "gpt-5.6-terra" && stagnantMtimeAgent.Effort == "medium", "stale-mtime rollout observes appended bytes incrementally without losing metadata");
+var localBoundaryRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-agent-activity-local-boundary-" + Guid.NewGuid());
+Directory.CreateDirectory(localBoundaryRoot);
+var localBoundaryWallClock = new DateTime(2026, 8, 14, 23, 58, 0, DateTimeKind.Unspecified);
+var localBoundaryNow = new DateTimeOffset(localBoundaryWallClock, TimeZoneInfo.Local.GetUtcOffset(localBoundaryWallClock));
+var localBoundaryPath = Path.Combine(localBoundaryRoot, $"rollout-{localBoundaryNow.LocalDateTime:yyyy-MM-dd}T23-58-00-local.jsonl");
+File.WriteAllText(localBoundaryPath, $"{{\"timestamp\":\"{localBoundaryNow.UtcDateTime:O}\",\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"local-boundary\",\"id\":\"local-boundary\"}}}}\n{{\"timestamp\":\"{localBoundaryNow.AddSeconds(1).UtcDateTime:O}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_started\",\"turn_id\":\"local-boundary-turn\"}}}}\n");
+File.SetLastWriteTimeUtc(localBoundaryPath, localBoundaryNow.AddDays(-2).UtcDateTime);
+Assert(new AgentActivityService(() => localBoundaryNow).Read(null, localBoundaryRoot).Single().ThreadId == "local-boundary", "rollout filename bootstrap uses the local calendar at the UTC date boundary");
+Directory.Delete(localBoundaryRoot, true);
+var evictionRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-agent-activity-eviction-" + Guid.NewGuid());
+Directory.CreateDirectory(evictionRoot);
+var evictionPath = Path.Combine(evictionRoot, "old-rollout.jsonl");
+File.WriteAllText(evictionPath, """
+{"timestamp":"2026-08-14T13:29:00Z","type":"session_meta","payload":{"session_id":"evict","id":"evict","thread_source":"user"}}
+{"timestamp":"2026-08-14T13:29:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"evict-turn"}}
+""");
+File.SetLastWriteTimeUtc(evictionPath, activityNow.UtcDateTime);
+var evictionNow = activityNow;
+var evictionService = new AgentActivityService(() => evictionNow);
+Assert(evictionService.Read(null, evictionRoot).Single().ThreadId == "evict" && CachedRolloutCount(evictionService) == 1, "recent mtime rollout enters the activity cache");
+evictionNow = activityNow.AddDays(2);
+Assert(evictionService.Read(null, evictionRoot).Count == 0 && CachedRolloutCount(evictionService) == 0, "unchanged stale rollout is evicted instead of remaining cached indefinitely");
+Directory.Delete(evictionRoot, true);
 File.AppendAllText(rootActivityPath, "\n{\"timestamp\":\"2026-08-14T13:29:58Z\",\"type\":\"event_msg\",\"payload\":");
 File.SetLastWriteTimeUtc(rootActivityPath, activityNow.UtcDateTime.AddSeconds(1));
 Assert(activityService.Read(null, activityRoot).Any(x => x.ThreadId == "root-1"), "partial active JSONL line does not erase the committed running state");
@@ -730,6 +847,9 @@ Directory.Delete(activityRoot, true);
 Console.WriteLine("All CodexTracker core tests passed.");
 
 static void Assert(bool condition, string message) { if (!condition) throw new InvalidOperationException("Test failed: " + message); }
+static int CachedRolloutCount(AgentActivityService service) =>
+    ((System.Collections.IDictionary)(typeof(AgentActivityService).GetField("_cache", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(service)
+        ?? throw new MissingFieldException(typeof(AgentActivityService).FullName, "_cache"))).Count;
 static bool NearlyEqual(double? actual, double expected) => actual is double value && Math.Abs(value - expected) < 0.000001;
 static bool NearlyEqualInstant(DateTimeOffset? actual, DateTimeOffset expected) => actual is { } value && Math.Abs((value - expected).TotalMilliseconds) < 1;
 static string FindRepositoryFile(params string[] segments)

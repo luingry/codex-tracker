@@ -42,11 +42,15 @@ public sealed class LocalUsageAnalyticsService
     private readonly Dictionary<string, CachedFile> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<DateTimeOffset> _clock;
     private readonly int _maxParseParallelism;
+    private readonly string? _stateDatabasePath;
+    private ThreadModelIndex? _threadModelIndex;
+    private string? _threadModelIndexPath;
 
-    public LocalUsageAnalyticsService(Func<DateTimeOffset>? clock = null, int? maxParseParallelism = null)
+    public LocalUsageAnalyticsService(Func<DateTimeOffset>? clock = null, int? maxParseParallelism = null, string? stateDatabasePath = null)
     {
         _clock = clock ?? (() => DateTimeOffset.Now);
         _maxParseParallelism = Math.Max(1, Math.Min(2, maxParseParallelism ?? Environment.ProcessorCount));
+        _stateDatabasePath = stateDatabasePath;
     }
     public int FilesParsedLastRead { get; private set; }
     public int FilesRebuiltLastRead { get; private set; }
@@ -90,6 +94,7 @@ public sealed class LocalUsageAnalyticsService
         var roots = root is not null
             ? [root]
             : DefaultRoots(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        var fallbackModels = ReadFallbackModels(root);
         var files = roots.Where(Directory.Exists).SelectMany(path => Directory.EnumerateFiles(path, "*.jsonl", SearchOption.AllDirectories))
             .Select(file => Describe(file)).ToArray();
         if (files.Length == 0) return new(0, 0, 0, 0, 0, []);
@@ -102,22 +107,23 @@ public sealed class LocalUsageAnalyticsService
             try
             {
                 var signature = FileSignature.Create(file.Path);
+                var fallbackModel = fallbackModels.TryGetValue(file.FileId, out var indexedModel) ? indexedModel : "unknown";
                 // Active JSONL files may end mid-record. Do not advance the cache offset over an incomplete line;
                 // the next read rebuilds this file after the writer commits its terminating newline.
                 var hasCommittedTail = HasFinalNewline(file.Path, signature.Length);
                 if (!hasCommittedTail)
                 {
-                    parsePlans.Add(new(file, signature, null, ParseKind.Partial));
+                    parsePlans.Add(new(file, signature, null, ParseKind.Partial, fallbackModel));
                     _cache.Remove(file.Path);
                     continue;
                 }
-                if (!_cache.TryGetValue(file.Path, out var cached) || cached.IsFork != file.IsFork || signature.Length < cached.Signature.Length || (signature.Length == cached.Signature.Length && signature.LastWriteUtcTicks != cached.Signature.LastWriteUtcTicks) || (signature.Length > cached.Signature.Length && PrefixMarker.Create(file.Path, cached.Signature.Length) != cached.PrefixMarker))
+                if (!_cache.TryGetValue(file.Path, out var cached) || cached.IsFork != file.IsFork || cached.FallbackModel != fallbackModel || signature.Length < cached.Signature.Length || (signature.Length == cached.Signature.Length && signature.LastWriteUtcTicks != cached.Signature.LastWriteUtcTicks) || (signature.Length > cached.Signature.Length && PrefixMarker.Create(file.Path, cached.Signature.Length) != cached.PrefixMarker))
                 {
-                    parsePlans.Add(new(file, signature, null, ParseKind.Rebuild));
+                    parsePlans.Add(new(file, signature, null, ParseKind.Rebuild, fallbackModel));
                 }
                 else if (signature.Length > cached.Signature.Length)
                 {
-                    parsePlans.Add(new(file, signature, cached, ParseKind.Append));
+                    parsePlans.Add(new(file, signature, cached, ParseKind.Append, fallbackModel));
                 }
                 else candidateCaches[file.Path] = cached;
             }
@@ -131,7 +137,7 @@ public sealed class LocalUsageAnalyticsService
             {
                 var offset = plan.Kind == ParseKind.Append ? plan.Previous!.Signature.Length : 0;
                 var baseline = plan.Kind == ParseKind.Append ? plan.Previous!.LastTotals : null;
-                var model = plan.Kind == ParseKind.Append ? plan.Previous!.LastModel : "unknown";
+                var model = plan.Kind == ParseKind.Append ? plan.Previous!.LastModel : plan.FallbackModel;
                 parseResults[index] = new(plan, ParseAggregate(plan.File.Path, offset, plan.Signature.Length, baseline, model, plan.File.IsFork, timelineCutoff), null);
             }
             catch (Exception ex) { parseResults[index] = new(plan, null, ex); }
@@ -151,13 +157,13 @@ public sealed class LocalUsageAnalyticsService
                 MergeBuckets(cached.Buckets, parsed.Buckets);
                 MergeTimeline(cached.Timeline, parsed.Timeline);
                 MergeModelTimeline(cached.ModelTimeline, parsed.ModelTimeline);
-                cached = cached with { Signature = plan.Signature, LastTotals = parsed.LastTotals ?? cached.LastTotals, LastModel = parsed.LastModel, PrefixMarker = PrefixMarker.Create(plan.File.Path, plan.Signature.Length) };
+                cached = cached with { Signature = plan.Signature, FallbackModel = plan.FallbackModel, LastTotals = parsed.LastTotals ?? cached.LastTotals, LastModel = parsed.LastModel, PrefixMarker = PrefixMarker.Create(plan.File.Path, plan.Signature.Length) };
                 FilesAppendedLastRead++;
                 BytesReadLastRead += plan.Signature.Length - previousLength;
             }
             else
             {
-                cached = new CachedFile(plan.Signature, plan.File.IsFork, parsed.Buckets, parsed.Timeline, parsed.ModelTimeline, parsed.LastTotals, parsed.LastModel, plan.Kind == ParseKind.Partial ? "" : PrefixMarker.Create(plan.File.Path, plan.Signature.Length));
+                cached = new CachedFile(plan.Signature, plan.File.IsFork, plan.FallbackModel, parsed.Buckets, parsed.Timeline, parsed.ModelTimeline, parsed.LastTotals, parsed.LastModel, plan.Kind == ParseKind.Partial ? "" : PrefixMarker.Create(plan.File.Path, plan.Signature.Length));
                 FilesRebuiltLastRead++;
                 BytesReadLastRead += plan.Signature.Length;
             }
@@ -213,6 +219,18 @@ public sealed class LocalUsageAnalyticsService
     }
 
     private static decimal CalculateCostUsd(IEnumerable<Aggregate> aggregates, (decimal Input, decimal Cached, decimal Output) price) => aggregates.Sum(value => (Math.Max(value.Input - value.Cached, 0) * price.Input + value.Cached * price.Cached + (value.Output + value.Reasoning) * price.Output) / 1_000_000m);
+
+    private IReadOnlyDictionary<string, string> ReadFallbackModels(string? root)
+    {
+        var databasePath = _stateDatabasePath ?? (root is null ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "state_5.sqlite") : null);
+        if (string.IsNullOrWhiteSpace(databasePath)) return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (_threadModelIndex is null || !string.Equals(_threadModelIndexPath, databasePath, StringComparison.OrdinalIgnoreCase))
+        {
+            _threadModelIndex = new ThreadModelIndex(databasePath!);
+            _threadModelIndexPath = databasePath;
+        }
+        return _threadModelIndex.Read();
+    }
 
     private static decimal CalculateCostUsd(IEnumerable<KeyValuePair<BucketKey, Aggregate>> buckets)
     {
@@ -274,6 +292,9 @@ public sealed class LocalUsageAnalyticsService
                 if (!root.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object) continue;
                 var top = ReadString(root, "type"); var legacy = ReadString(payload, "type");
                 if ((top == "turn_context" || legacy == "turn_context") && ReadString(payload, "model") is { } currentModel) model = currentModel;
+                else if (top == "event_msg" && legacy == "thread_settings_applied" &&
+                         payload.TryGetProperty("thread_settings", out var settings) && settings.ValueKind == JsonValueKind.Object &&
+                         ReadString(settings, "model") is { } settingsModel) model = settingsModel;
                 var type = top == "event_msg" ? ReadString(payload, "type") : legacy;
                 if (type != "token_count" || !payload.TryGetProperty("info", out var info) || !info.TryGetProperty("total_token_usage", out var total)) continue;
                 var current = Totals.From(total); if (current is null) continue;
@@ -310,9 +331,9 @@ public sealed class LocalUsageAnalyticsService
     private sealed record FileDescriptor(string Path, string SessionId, string FileId, bool IsFork, DateTimeOffset? StartedAt);
     private sealed record LogicalFileCandidate(FileDescriptor File, CachedFile Cache);
     private enum ParseKind { Partial, Rebuild, Append }
-    private sealed record ParsePlan(FileDescriptor File, FileSignature Signature, CachedFile? Previous, ParseKind Kind);
+    private sealed record ParsePlan(FileDescriptor File, FileSignature Signature, CachedFile? Previous, ParseKind Kind, string FallbackModel);
     private sealed record ParsePlanResult(ParsePlan Plan, ParseAggregateResult? Parsed, Exception? Error);
-    private sealed record CachedFile(FileSignature Signature, bool IsFork, Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Totals? LastTotals, string LastModel, string PrefixMarker);
+    private sealed record CachedFile(FileSignature Signature, bool IsFork, string FallbackModel, Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Totals? LastTotals, string LastModel, string PrefixMarker);
     private sealed record ParseAggregateResult(Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Totals? LastTotals, string LastModel, int MalformedLineCount);
     private readonly record struct FileSignature(long Length, long LastWriteUtcTicks)
     {

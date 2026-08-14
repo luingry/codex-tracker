@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 
 namespace CodexTracker.Core;
@@ -42,7 +43,10 @@ public sealed class AgentActivityService
         var cutoff = now - _staleAfter;
         var recentFiles = Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories)
             .Select(path => new FileInfo(path))
-            .Where(file => file.Exists && file.LastWriteTimeUtc >= cutoff.UtcDateTime)
+            .Where(file => file.Exists &&
+                           (file.LastWriteTimeUtc >= cutoff.UtcDateTime ||
+                            IsRecentRolloutCandidate(file, now) ||
+                            ShouldRetainCachedFile(file, cutoff)))
             .ToArray();
         var recentPaths = new HashSet<string>(recentFiles.Select(file => file.FullName), StringComparer.OrdinalIgnoreCase);
         foreach (var stalePath in _cache.Keys.Where(path => !recentPaths.Contains(path)).ToArray()) _cache.Remove(stalePath);
@@ -153,7 +157,7 @@ public sealed class AgentActivityService
                     continue;
                 }
 
-                if (topType == "turn_context")
+                if (topType == "turn_context" || ReadString(payload, "type") == "turn_context")
                 {
                     state = state with { Model = ReadString(payload, "model") ?? state.Model, Effort = ReadString(payload, "effort") ?? state.Effort, LastActivityAt = at };
                     continue;
@@ -190,6 +194,22 @@ public sealed class AgentActivityService
 
     private static string? ReadString(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     private static DateTimeOffset? ReadTimestamp(JsonElement element) => ReadString(element, "timestamp") is { } value && DateTimeOffset.TryParse(value, out var timestamp) ? timestamp.ToUniversalTime() : null;
+    private bool ShouldRetainCachedFile(FileInfo file, DateTimeOffset cutoff)
+    {
+        if (!_cache.TryGetValue(file.FullName, out var cached)) return false;
+        var signature = new RolloutSignature(file.Length, file.LastWriteTimeUtc.Ticks);
+        return cached.State.LastActivityAt >= cutoff || cached.Signature != signature;
+    }
+
+    private static bool IsRecentRolloutCandidate(FileInfo file, DateTimeOffset now)
+    {
+        const string prefix = "rollout-";
+        var name = file.Name;
+        var localToday = now.LocalDateTime.Date;
+        return name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && name.Length >= prefix.Length + 10 &&
+               DateTime.TryParseExact(name.Substring(prefix.Length, 10), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var sessionDate) &&
+               (sessionDate.Date == localToday || sessionDate.Date == localToday.AddDays(-1));
+    }
     private static bool HasFinalNewline(string path, long length)
     {
         if (length == 0) return true;

@@ -229,7 +229,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var secondaryText = item.Priced
                 ? CurrencyPresentation.FormatCost(item.CostUsd, item.CostUsd * _lastAnalytics.UsdBrl, CurrencyCode, LocalizationManager.CurrentLanguageCode)
                 : LocalizationManager.Text("NoTariff");
-            Ranking.Add(new(item.Model, TokenPresentation.Format(item.Tokens, LocalizationManager.CurrentLanguageCode), item.Tokens / (double)max, item.Priced, secondaryText));
+            var displayModel = string.Equals(item.Model, "unknown", StringComparison.Ordinal)
+                ? LocalizationManager.Text("UnregisteredModel")
+                : item.Model;
+            Ranking.Add(new(displayModel, TokenPresentation.Format(item.Tokens, LocalizationManager.CurrentLanguageCode), item.Tokens / (double)max, item.Priced, secondaryText));
         }
     }
     private void ApplyForecast(WeeklyForecast forecast)
