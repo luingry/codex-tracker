@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.11.6] - 2026-08-14
+
+### Added
+
+- Usage ranking rows now show each priced model's estimated API-equivalent cost below its tokens for the selected day, active quota week, or month. Unpriced models continue to show the localized no-tariff label.
+
 ## [0.11.5] - 2026-08-14
 
 ### Changed

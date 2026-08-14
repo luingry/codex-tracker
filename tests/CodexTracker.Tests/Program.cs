@@ -140,19 +140,28 @@ Assert(WidgetPlacementPolicy.Restore(removedMonitorBounds, dualMonitorWorkAreas)
 var rankingNow = DateTimeOffset.Now;
 var rankingCycleEnd = new DateTimeOffset(2026, 8, 16, 12, 0, 0, TimeSpan.Zero);
 var rankingCycleStart = rankingCycleEnd.AddMinutes(-10080);
-var rankingAnalytics = new UsageAnalytics(0, 99, 0, 0, 0, [new ModelUsage("month-model", 99, 0, true)], ModelTimeline:
+var rankingAnalytics = new UsageAnalytics(0, 143, 0, 0, 0, [new ModelUsage("month-model", 99, 9.9m, true), new ModelUsage("no-tariff-model", 44, 0, false)], UsdBrl: 5m, ModelTimeline:
 [
-    new(rankingNow.AddMinutes(-1), "day-model", 11, 0, false),
-    new(rankingCycleStart.AddMinutes(1), "cycle-model", 50, 0, true),
-    new(rankingCycleStart.AddMinutes(-1), "outside-cycle-model", 99, 0, true)
+    new(rankingNow.AddMinutes(-1), "day-model", 11, 1.25m, true),
+    new(rankingCycleStart.AddMinutes(1), "cycle-model", 50, 2.5m, true),
+    new(rankingCycleStart.AddMinutes(-1), "outside-cycle-model", 99, 9.9m, true)
 ]);
 var rankingViewModel = new MainViewModel();
 rankingViewModel.Apply(new RateLimitSnapshot([new("codex:primary", "Weekly limit", 16, rankingCycleEnd, 10080)], null, null, null, rankingNow), rankingAnalytics);
-Assert(rankingViewModel.Ranking.Single().Model == "month-model", "ranking preserves the monthly view as its default");
+Assert(rankingViewModel.Ranking.First().Model == "month-model" && rankingViewModel.Ranking.First().SecondaryText == "R$ 49,50" && rankingViewModel.Ranking.Single(row => row.Model == "no-tariff-model").SecondaryText == "sem tarifa", "monthly ranking shows the priced model cost converted with analytics USD/BRL and preserves the localized no-tariff state for unpriced models in the same secondary line");
+rankingViewModel.SetCurrency("USD");
+Assert(rankingViewModel.Ranking.First().SecondaryText == "US$ 9,90", "monthly ranking refreshes priced costs when the selected currency changes to USD");
+LocalizationManager.Apply("en-US");
+rankingViewModel.RefreshLocalization();
+Assert(rankingViewModel.Ranking.First().SecondaryText == "US$ 9.90" && rankingViewModel.Ranking.Single(row => row.Model == "no-tariff-model").SecondaryText == "no tariff", "ranking refreshes cost formatting and unpriced text when the interface language changes to en-US");
+rankingViewModel.SetCurrency("BRL");
+Assert(rankingViewModel.Ranking.First().SecondaryText == "R$ 49.50", "ranking refreshes BRL cost formatting using the active en-US culture");
 rankingViewModel.IsRankingDay = true;
-Assert(rankingViewModel.Ranking.Single().Model == "day-model", "day ranking filters model usage to the current day");
+Assert(rankingViewModel.Ranking.Single().Model == "day-model" && rankingViewModel.Ranking.Single().SecondaryText == "R$ 6.25", "day ranking filters model usage and uses the day CostUsd rather than the monthly aggregate");
 rankingViewModel.IsRankingWeek = true;
-Assert(rankingViewModel.Ranking.Any(row => row.Model == "cycle-model") && rankingViewModel.Ranking.All(row => row.Model != "outside-cycle-model"), "week ranking uses only the active Codex quota cycle, including usage before Monday and excluding usage outside the cycle");
+Assert(rankingViewModel.Ranking.Any(row => row.Model == "cycle-model" && row.SecondaryText == "R$ 12.50") && rankingViewModel.Ranking.All(row => row.Model != "outside-cycle-model"), "week ranking uses only the active Codex quota cycle and its period CostUsd, excluding usage outside the cycle");
+LocalizationManager.Apply("pt-BR");
+rankingViewModel.RefreshLocalization();
 rankingViewModel.ApplyQuota(new RateLimitSnapshot([], null, null, null, rankingNow));
 Assert(rankingViewModel.Ranking.Count == 0, "week ranking is empty when the official active Codex quota cycle is unavailable");
 
@@ -217,6 +226,7 @@ var roundedClipBorderSource = File.ReadAllText(Path.Combine(Directory.GetCurrent
 Assert(agentListTemplate.Contains("x:Name=\"AgentListWrapper\" Width=\"288\" MaxHeight=\"350\" Background=\"Transparent\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Border.Effect><DropShadowEffect BlurRadius=\"12\" ShadowDepth=\"3\" Opacity=\".28\" Color=\"#151A18\" /></Border.Effect>", StringComparison.Ordinal) && agentListTemplate.Contains("<local:RoundedClipBorder x:Name=\"AgentListClipSurface\" Padding=\"0\" CornerRadius=\"12\" Background=\"{DynamicResource DetailedSurface}\"", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"AgentRow\" Margin=\"0\"", StringComparison.Ordinal) && agentListTemplate.Contains("<ContentPresenter Margin=\"0,8\" HorizontalAlignment=\"{TemplateBinding HorizontalContentAlignment}\" VerticalAlignment=\"{TemplateBinding VerticalContentAlignment}\" />", StringComparison.Ordinal) && agentListTemplate.Contains("<Border Margin=\"{Binding Indent}\" Padding=\"15,6\">", StringComparison.Ordinal) && roundedClipBorderSource.Contains("Clip = new RectangleGeometry(new Rect(RenderSize), radius, radius);", StringComparison.Ordinal), "agent list keeps its shadow on an outer un-clipped wrapper while an inner dynamically sized rounded geometry clips every contiguous full-width row interaction");
 Assert(agentListTemplate.Contains("Text=\"{Binding ModelAndEffort}\"", StringComparison.Ordinal) && agentListTemplate.Contains("Foreground=\"{DynamicResource AgentMetadataAccent}\"", StringComparison.Ordinal), "agent model and effort bind to the contrast-safe muted accent resource instead of fixed opacity or generic secondary ink");
 Assert(agentListTemplate.Contains("<Grid.ColumnDefinitions><ColumnDefinition Width=\"Auto\" /><ColumnDefinition Width=\"*\" /></Grid.ColumnDefinitions>", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"KindLabel\" Text=\"{Binding Type}\" MaxWidth=\"58\"", StringComparison.Ordinal) && agentListTemplate.Contains("Margin=\"0,0,6,0\"", StringComparison.Ordinal) && agentListTemplate.Contains("Grid.Column=\"1\" Text=\"{Binding ModelAndEffort}\"", StringComparison.Ordinal) && agentListTemplate.Contains("TextTrimming=\"CharacterEllipsis\" HorizontalAlignment=\"Left\"", StringComparison.Ordinal) && agentListTemplate.Contains("Grid.Column=\"1\" Text=\"{Binding Elapsed}\"", StringComparison.Ordinal) && !agentListTemplate.Contains("TextAlignment=\"Right\"", StringComparison.Ordinal) && !agentListTemplate.Contains("Grid.Row=\"3\" Text=\"{Binding ModelAndEffort}\"", StringComparison.Ordinal), "agent model and effort stay immediately after a bounded type label with a consistent small gap and truncation, while elapsed remains on the status row");
+Assert(mainWindowXaml.Contains("Text=\"{Binding Tokens}\" FontSize=\"10\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Text=\"{Binding SecondaryText}\" FontSize=\"8\" Foreground=\"{DynamicResource SoftInk}\"", StringComparison.Ordinal) && !mainWindowXaml.Contains("Text=\"{Binding Cost}\"", StringComparison.Ordinal) && !mainWindowXaml.Contains("Text=\"{Binding TariffNote}\"", StringComparison.Ordinal), "ranking rows use exactly one small secondary line below tokens for either the estimated cost or the localized no-tariff text");
 Assert(mainWindowXaml.Contains("x:Name=\"AccentColorButton\" Click=\"ChooseAccentColor\"", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"AccentColorSwatch\"", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"AccentColorValue\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Color=\"{DynamicResource AccentGlow}\"", StringComparison.Ordinal), "settings expose an accessible accent color picker and the agent ripple glow follows the derived palette");
 Assert(mainWindowXaml.Contains("x:Name=\"LanguageBox\" SelectionChanged=\"PreviewLanguage\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Tag=\"pt-BR\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Tag=\"en-US\"", StringComparison.Ordinal) && mainWindowXaml.Contains("{DynamicResource Loc.Settings}", StringComparison.Ordinal), "settings expose pt-BR/en-US selection and static UI strings use dynamic localization resources");
 var rankingPeriodStyleStart = mainWindowXaml.IndexOf("<Style TargetType=\"RadioButton\">", StringComparison.Ordinal);

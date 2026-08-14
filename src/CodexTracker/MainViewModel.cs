@@ -7,7 +7,7 @@ using CodexTracker.Core;
 
 namespace CodexTracker;
 
-public sealed record RankingRow(string Model, string Tokens, double Fraction, bool Priced, string TariffNote);
+public sealed record RankingRow(string Model, string Tokens, double Fraction, bool Priced, string SecondaryText);
 public sealed class AgentActivityRow : INotifyPropertyChanged
 {
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -172,6 +172,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         CurrencyCode = CurrencyPresentation.Normalize(currencyCode);
         RefreshFormattedCosts();
+        RefreshRanking();
     }
 
     public void Apply(RateLimitSnapshot snapshot, UsageAnalytics analytics, string? currencyCode = null)
@@ -223,7 +224,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
         };
         Ranking.Clear();
         var max = Math.Max(1, models.Take(5).Select(x => x.Tokens).DefaultIfEmpty().Max());
-        foreach (var item in models.Take(5)) Ranking.Add(new(item.Model, TokenPresentation.Format(item.Tokens, LocalizationManager.CurrentLanguageCode), item.Tokens / (double)max, item.Priced, item.Priced ? "" : LocalizationManager.Text("NoTariff")));
+        foreach (var item in models.Take(5))
+        {
+            var secondaryText = item.Priced
+                ? CurrencyPresentation.FormatCost(item.CostUsd, item.CostUsd * _lastAnalytics.UsdBrl, CurrencyCode, LocalizationManager.CurrentLanguageCode)
+                : LocalizationManager.Text("NoTariff");
+            Ranking.Add(new(item.Model, TokenPresentation.Format(item.Tokens, LocalizationManager.CurrentLanguageCode), item.Tokens / (double)max, item.Priced, secondaryText));
+        }
     }
     private void ApplyForecast(WeeklyForecast forecast)
     {
