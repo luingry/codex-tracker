@@ -25,9 +25,12 @@ public partial class MainWindow : Window
     private readonly AgentActivityService _agentActivity = new();
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(60) };
     private readonly DispatcherTimer _agentTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer _visibilityTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private readonly Dictionary<string, string> _threadTitles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTimeOffset> _threadTitleLookups = new(StringComparer.OrdinalIgnoreCase);
     private readonly bool _demo;
+    private readonly HashSet<string> _observedCompletionIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<CompletedAgentWork> _unreadAgentWorks;
     private AppSettings _settings;
     private CodexAppServerClient? _client;
     private Forms.NotifyIcon? _tray;
@@ -38,6 +41,7 @@ public partial class MainWindow : Window
     private int _agentRefreshRunning;
     private int _titleRefreshRunning;
     private int _refreshTick;
+    private bool _agentStateInitialized;
     private UsageAnalytics? _lastLoadedAnalytics;
     private bool _dragCandidate;
     private bool _nativeDragInProgress;
@@ -75,6 +79,8 @@ public partial class MainWindow : Window
     public MainWindow(bool demo = false)
     {
         _settings = _store.Load();
+        _unreadAgentWorks = (_settings.UnreadAgentWorks ?? []).OrderByDescending(work => work.CompletedAt).ToList();
+        _observedCompletionIds.UnionWith(_unreadAgentWorks.Select(work => work.CompletionId));
         LocalizationManager.Apply(_settings.LanguageCode);
         _viewModel = new MainViewModel();
         InitializeComponent();
@@ -93,15 +99,18 @@ public partial class MainWindow : Window
         _viewModel.SetCurrency(_settings.CurrencyCode);
         _viewModel.Expanded = _settings.IsExpanded;
         _viewModel.IsAgentListOpen = false;
+        _viewModel.ApplyUnreadCompletedAgents(_unreadAgentWorks);
         ApplyWindowModeSize();
         Left = _settings.Left;
         Top = _settings.Top;
-        Loaded += (_, _) =>
+        Loaded += async (_, _) =>
         {
             _refreshTimer.Start();
             _agentTimer.Start();
+            _visibilityTimer.Start();
             _ = LoadAsync();
-            _ = RefreshAgentsAsync();
+            await RefreshAgentsAsync();
+            UpdateWidgetVisibility();
             _ = RefreshAnalyticsAsync();
         };
         Closing += OnClosing;
@@ -109,6 +118,7 @@ public partial class MainWindow : Window
         LocationChanged += (_, _) => RepositionAgentListPopup();
         _refreshTimer.Tick += async (_, _) => await RefreshAsync();
         _agentTimer.Tick += async (_, _) => await RefreshAgentsAsync();
+        _visibilityTimer.Tick += (_, _) => UpdateWidgetVisibility();
         CreateTray();
     }
 
@@ -232,24 +242,45 @@ public partial class MainWindow : Window
         try
         {
             var titles = new Dictionary<string, string>(_threadTitles, StringComparer.OrdinalIgnoreCase);
-            var agents = await Task.Run(() => _agentActivity.Read(titles));
+            var activity = await Task.Run(() => _agentActivity.ReadSnapshot(titles));
+            var agents = activity.ActiveAgents;
+            var unreadChanged = false;
+            if (!_agentStateInitialized)
+            {
+                _observedCompletionIds.UnionWith(activity.CompletedAgentWorks.Select(work => work.CompletionId));
+                _agentStateInitialized = true;
+            }
+            else
+            {
+                foreach (var completed in activity.CompletedAgentWorks.Where(work => _observedCompletionIds.Add(work.CompletionId)))
+                {
+                    _unreadAgentWorks.Add(completed);
+                    unreadChanged = true;
+                }
+            }
+            if (unreadChanged) PersistUnreadAgentWorks();
+            var previouslyVisibleIndicator = _viewModel.HasAgentIndicator;
             var previouslyActive = _viewModel.HasActiveAgents;
             _viewModel.ApplyAgents(agents, DateTimeOffset.UtcNow, AgentListPopup.IsOpen);
-            if (previouslyActive != _viewModel.HasActiveAgents)
+            _viewModel.ApplyUnreadCompletedAgents(_unreadAgentWorks);
+            if (previouslyVisibleIndicator != _viewModel.HasAgentIndicator)
             {
-                if (!_viewModel.HasActiveAgents) _viewModel.IsAgentListOpen = false;
+                if (!_viewModel.HasAgentIndicator) _viewModel.IsAgentListOpen = false;
                 else if (_settings.IsAgentListExpanded && !_viewModel.Expanded) _viewModel.IsAgentListOpen = true;
                 ApplyCompactAgentIndicatorSize();
             }
+            else if (previouslyActive != _viewModel.HasActiveAgents && _settings.IsAgentListExpanded && !_viewModel.Expanded)
+                _viewModel.IsAgentListOpen = true;
             if (AgentListPopup.IsOpen && _viewModel.ActiveAgents.Any(row => row.IsNew))
                 _ = Dispatcher.InvokeAsync(async () => { await Task.Delay(210); _viewModel.MarkNewAgentRowsStable(); });
 
             var now = DateTimeOffset.UtcNow;
-            var missingTitles = agents.Select(agent => agent.ThreadId)
+            var missingTitles = agents.Select(agent => agent.ThreadId).Concat(_unreadAgentWorks.Select(work => work.ThreadId))
                 .Where(id => !_threadTitles.ContainsKey(id) &&
                              (!_threadTitleLookups.TryGetValue(id, out var attemptedAt) || now - attemptedAt >= TimeSpan.FromMinutes(1)))
                 .ToArray();
             if (missingTitles.Length > 0) _ = RefreshAgentTitlesAsync(missingTitles);
+            UpdateWidgetVisibility();
         }
         catch (Exception exception) { SanitizedLogger.Write("Agent activity refresh error: " + exception.GetType().Name); }
         finally { Volatile.Write(ref _agentRefreshRunning, 0); }
@@ -264,6 +295,19 @@ public partial class MainWindow : Window
             foreach (var threadId in threadIds) _threadTitleLookups[threadId] = attemptedAt;
             var titles = await _client.ReadThreadTitlesAsync(threadIds, _shutdown.Token);
             foreach (var title in titles) _threadTitles[title.Key] = title.Value;
+            var unreadChanged = false;
+            for (var index = 0; index < _unreadAgentWorks.Count; index++)
+            {
+                var work = _unreadAgentWorks[index];
+                if (!titles.TryGetValue(work.ThreadId, out var title) || string.IsNullOrWhiteSpace(title) || string.Equals(work.Title, title, StringComparison.Ordinal)) continue;
+                _unreadAgentWorks[index] = work with { Title = title.Trim() };
+                unreadChanged = true;
+            }
+            if (unreadChanged)
+            {
+                PersistUnreadAgentWorks();
+                _viewModel.ApplyUnreadCompletedAgents(_unreadAgentWorks);
+            }
         }
         catch (Exception exception) { SanitizedLogger.Write("Agent title refresh error: " + exception.GetType().Name); }
         finally { Volatile.Write(ref _titleRefreshRunning, 0); }
@@ -306,6 +350,7 @@ public partial class MainWindow : Window
 
     private void ToggleAgentList(object sender, RoutedEventArgs e)
     {
+        if (!_viewModel.HasAgentIndicator) return;
         var isOpen = !_viewModel.IsAgentListOpen;
         _viewModel.IsAgentListOpen = isOpen;
         _settings = _settings with { IsAgentListExpanded = isOpen };
@@ -321,8 +366,50 @@ public partial class MainWindow : Window
             return;
         }
 
-        try { Process.Start(new ProcessStartInfo(deepLink.AbsoluteUri) { UseShellExecute = true }); }
+        try
+        {
+            Process.Start(new ProcessStartInfo(deepLink.AbsoluteUri) { UseShellExecute = true });
+            if (sender is System.Windows.Controls.Button { DataContext: AgentActivityRow { IsCompleted: true } }) MarkThreadRead(threadId);
+        }
         catch (Exception exception) { SanitizedLogger.Write("Agent thread link launch failed: " + exception.GetType().Name); }
+    }
+
+    private void MarkThreadRead(string threadId)
+    {
+        if (_unreadAgentWorks.RemoveAll(work => string.Equals(work.ThreadId, threadId, StringComparison.OrdinalIgnoreCase)) == 0) return;
+        PersistUnreadAgentWorks();
+        var previouslyVisibleIndicator = _viewModel.HasAgentIndicator;
+        _viewModel.ApplyUnreadCompletedAgents(_unreadAgentWorks);
+        if (previouslyVisibleIndicator != _viewModel.HasAgentIndicator) ApplyCompactAgentIndicatorSize();
+        if (!_viewModel.HasAgentIndicator) _viewModel.IsAgentListOpen = false;
+    }
+
+    private void PersistUnreadAgentWorks()
+    {
+        _unreadAgentWorks.Sort((left, right) => right.CompletedAt.CompareTo(left.CompletedAt));
+        if (_unreadAgentWorks.Count > 50) _unreadAgentWorks.RemoveRange(50, _unreadAgentWorks.Count - 50);
+        _settings = _settings with { UnreadAgentWorks = _unreadAgentWorks.ToArray() };
+        _store.Save(_settings);
+    }
+
+    private void UpdateWidgetVisibility()
+    {
+        if (_demo || !IsLoaded) return;
+        var codex = CodexDesktopWindowMonitor.Read();
+        var shouldShow = WidgetVisibilityPolicy.ShouldShow(
+            _viewModel.HasActiveAgents,
+            _viewModel.HasUnreadCompletedAgents,
+            codex.IsForeground,
+            codex.IsMinimized,
+            IsActive || AgentListPopup.IsOpen);
+        if (shouldShow)
+        {
+            if (!IsVisible) Show();
+            return;
+        }
+        if (!IsVisible) return;
+        _viewModel.IsAgentListOpen = false;
+        Hide();
     }
 
     private void AgentRowMouseEnter(object sender, System.Windows.Input.MouseEventArgs e) => AnimateAgentRowHover(sender as System.Windows.Controls.Button, true);
@@ -406,7 +493,7 @@ public partial class MainWindow : Window
         CaptureCurrentModeSize();
         _viewModel.Expanded = !_viewModel.Expanded;
         if (_viewModel.Expanded) _viewModel.IsAgentListOpen = false;
-        else if (_settings.IsAgentListExpanded && _viewModel.HasActiveAgents) _viewModel.IsAgentListOpen = true;
+        else if (_settings.IsAgentListExpanded && _viewModel.HasAgentIndicator) _viewModel.IsAgentListOpen = true;
         ApplyWindowModeSize();
         if (!_viewModel.Expanded && _viewModel.IsAgentListOpen) RepositionAgentListPopup();
         Save();
@@ -747,7 +834,7 @@ public partial class MainWindow : Window
 
         var compactBounds = ManualResizeGeometry.ResizeCompact(start, delta, handle, _resizeWorkArea, CompactMinWidth, CompactMaxWidth);
         Left = compactBounds.Left;
-        Top = compactBounds.Top - (_viewModel.HasActiveAgents && handle.HasFlag(ResizeHandle.Top) ? CompactAgentIndicatorHeight : 0d);
+        Top = compactBounds.Top - (_viewModel.HasAgentIndicator && handle.HasFlag(ResizeHandle.Top) ? CompactAgentIndicatorHeight : 0d);
         SetCompactSize(compactBounds.Width);
     }
 
@@ -883,7 +970,7 @@ public partial class MainWindow : Window
         Width = width;
         Height = width / CompactAspectRatio + ActiveCompactExtraHeight;
     }
-    private double ActiveCompactExtraHeight => _viewModel.HasActiveAgents ? CompactAgentIndicatorHeight : 0d;
+    private double ActiveCompactExtraHeight => _viewModel.HasAgentIndicator ? CompactAgentIndicatorHeight : 0d;
     private void ApplyCompactAgentIndicatorSize()
     {
         if (CurrentVisualMode != WidgetVisualMode.Compact) return;
@@ -908,6 +995,7 @@ public partial class MainWindow : Window
     {
         _refreshTimer.Stop();
         _agentTimer.Stop();
+        _visibilityTimer.Stop();
         _shutdown.Cancel();
         _client?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _tray?.Dispose();

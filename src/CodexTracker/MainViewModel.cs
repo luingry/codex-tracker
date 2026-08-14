@@ -16,7 +16,7 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
     private Thickness _indent;
     private string _sourceType = "", _sourceTitle = "", _sourceStatus = "";
     private string _type = "", _title = "", _status = "", _modelAndEffort = "", _elapsed = "";
-    private bool _isWorkAnimationEnabled, _isNew;
+    private bool _isWorkAnimationEnabled, _isNew, _isCompleted;
     public AgentActivityRow(ActiveAgent agent, DateTimeOffset now, bool isNew)
     {
         ThreadId = agent.ThreadId;
@@ -24,7 +24,26 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
         Update(agent, now);
     }
 
+    public AgentActivityRow(CompletedAgentWork work)
+    {
+        ThreadId = work.ThreadId;
+        CompletionId = work.CompletionId;
+        Update(work);
+    }
+
+    public void Update(CompletedAgentWork work)
+    {
+        _sourceType = work.Type;
+        _sourceTitle = work.Title;
+        _sourceStatus = work.Status;
+        Set(ref _isCompleted, true, nameof(IsCompleted));
+        RefreshLocalization();
+        Set(ref _modelAndEffort, $"{work.Model} · {work.Effort}", nameof(ModelAndEffort));
+        Set(ref _elapsed, FormatElapsed(work.CompletedAt - work.StartedAt), nameof(Elapsed));
+    }
+
     public string ThreadId { get; }
+    public string? CompletionId { get; }
     public string? ParentThreadId => _parentThreadId;
     public int HierarchyDepth => _hierarchyDepth;
     public Thickness Indent => _indent;
@@ -35,6 +54,7 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
     public string Elapsed => _elapsed;
     public bool IsWorkAnimationEnabled => _isWorkAnimationEnabled;
     public bool IsNew => _isNew;
+    public bool IsCompleted => _isCompleted;
 
     public void Update(ActiveAgent agent, DateTimeOffset now)
     {
@@ -70,8 +90,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
     private string _weekly = "--", _weeklyTokens = "--", _weeklyCost = "--", _reset = LocalizationManager.Text("LoadingWeeklyQuota"), _today = "--", _month = "--", _cost = "--", _todayCost = "--", _monthCost = "--", _coverage = "", _forecast = LocalizationManager.Text("InsufficientData"), _status = LocalizationManager.Text("Loading"), _currencyCode = "BRL";
     private bool _expanded, _topmost, _isExhaustionRisk;
-    private bool _hasActiveAgents, _isAgentListOpen;
-    private int _activeAgentCount;
+    private bool _hasActiveAgents, _hasUnreadCompletedAgents, _isAgentListOpen;
+    private int _activeAgentCount, _unreadCompletedAgentCount;
     private double _remainingPercent;
     private long? _weeklyTokenCount;
     private decimal _lastTodayUsd, _lastTodayBrl, _lastMonthUsd, _lastMonthBrl;
@@ -83,8 +103,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private (DateTimeOffset Start, DateTimeOffset End)? _activeQuotaCycle;
     private RankingPeriod _rankingPeriod = RankingPeriod.Month;
     private bool _hasAnalytics;
+    private IReadOnlyList<AgentActivityRow> _completedAgentRows = [];
     public ObservableCollection<RankingRow> Ranking { get; } = [];
     public ObservableCollection<AgentActivityRow> ActiveAgents { get; } = [];
+    public ObservableCollection<AgentActivityRow> AgentItems { get; } = [];
     public string AppVersion { get; } = $"v{Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0"}";
     public string Weekly { get => _weekly; set => Set(ref _weekly, value); }
     public string WeeklyTokens { get => _weeklyTokens; private set => Set(ref _weeklyTokens, value); }
@@ -118,9 +140,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public bool Expanded { get => _expanded; set => Set(ref _expanded, value); }
     public bool Topmost { get => _topmost; set => Set(ref _topmost, value); }
     public bool HasActiveAgents { get => _hasActiveAgents; private set => Set(ref _hasActiveAgents, value); }
+    public bool HasUnreadCompletedAgents { get => _hasUnreadCompletedAgents; private set => Set(ref _hasUnreadCompletedAgents, value); }
+    public bool HasAgentIndicator => HasActiveAgents || HasUnreadCompletedAgents;
+    public bool ShowsCompletedIndicator => !HasActiveAgents && HasUnreadCompletedAgents;
+    public string AgentIndicatorTooltip => LocalizationManager.Text(ShowsCompletedIndicator ? "UnreadAgentCompletions" : "AgentsWorkingTooltip");
     public bool IsAgentListOpen { get => _isAgentListOpen; set => Set(ref _isAgentListOpen, value); }
     public bool IsWorkAnimationEnabled => HasActiveAgents && SystemParameters.ClientAreaAnimation;
     public int ActiveAgentCount { get => _activeAgentCount; private set => Set(ref _activeAgentCount, value); }
+    public int UnreadCompletedAgentCount { get => _unreadCompletedAgentCount; private set => Set(ref _unreadCompletedAgentCount, value); }
     public double RemainingPercent { get => _remainingPercent; set => Set(ref _remainingPercent, value); }
     public bool IsRankingDay { get => _rankingPeriod == RankingPeriod.Day; set { if (value) SetRankingPeriod(RankingPeriod.Day); } }
     public bool IsRankingWeek { get => _rankingPeriod == RankingPeriod.Week; set { if (value) SetRankingPeriod(RankingPeriod.Week); } }
@@ -148,6 +175,48 @@ public sealed class MainViewModel : INotifyPropertyChanged
         ActiveAgentCount = agents.Count;
         HasActiveAgents = hasActiveAgents;
         PropertyChanged?.Invoke(this, new(nameof(IsWorkAnimationEnabled)));
+        PropertyChanged?.Invoke(this, new(nameof(HasAgentIndicator)));
+        PropertyChanged?.Invoke(this, new(nameof(ShowsCompletedIndicator)));
+        PropertyChanged?.Invoke(this, new(nameof(AgentIndicatorTooltip)));
+        RefreshAgentItems();
+    }
+
+    public void ApplyUnreadCompletedAgents(IReadOnlyList<CompletedAgentWork> works)
+    {
+        var existing = _completedAgentRows
+            .Where(row => row.CompletionId is not null)
+            .ToDictionary(row => row.CompletionId!, StringComparer.OrdinalIgnoreCase);
+        _completedAgentRows = works
+            .Where(work => !string.Equals(work.Type, "Subagent", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(work => work.CompletionId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderByDescending(work => work.CompletedAt).First())
+            .OrderByDescending(work => work.CompletedAt)
+            .Select(work =>
+            {
+                if (!existing.TryGetValue(work.CompletionId, out var row)) return new AgentActivityRow(work);
+                row.Update(work);
+                return row;
+            })
+            .ToArray();
+        UnreadCompletedAgentCount = _completedAgentRows.Count;
+        HasUnreadCompletedAgents = _completedAgentRows.Count > 0;
+        PropertyChanged?.Invoke(this, new(nameof(HasAgentIndicator)));
+        PropertyChanged?.Invoke(this, new(nameof(ShowsCompletedIndicator)));
+        PropertyChanged?.Invoke(this, new(nameof(AgentIndicatorTooltip)));
+        RefreshAgentItems();
+    }
+
+    private void RefreshAgentItems()
+    {
+        var source = ActiveAgents.Concat(_completedAgentRows).ToArray();
+        for (var index = 0; index < source.Length; index++)
+        {
+            if (index < AgentItems.Count && ReferenceEquals(AgentItems[index], source[index])) continue;
+            var currentIndex = AgentItems.IndexOf(source[index]);
+            if (currentIndex >= 0) AgentItems.Move(currentIndex, index);
+            else AgentItems.Insert(index, source[index]);
+        }
+        while (AgentItems.Count > source.Length) AgentItems.RemoveAt(AgentItems.Count - 1);
     }
 
     public void MarkNewAgentRowsStable()
@@ -275,6 +344,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         else Forecast = LocalizationManager.Text("InsufficientData");
         Status = LocalizationManager.TranslateKnown(Status);
         foreach (var row in ActiveAgents) row.RefreshLocalization();
+        foreach (var row in AgentItems.Where(row => row.IsCompleted)) row.RefreshLocalization();
+        PropertyChanged?.Invoke(this, new(nameof(AgentIndicatorTooltip)));
         RefreshRanking();
         RefreshFormattedCosts();
     }

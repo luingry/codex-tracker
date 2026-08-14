@@ -16,6 +16,21 @@ public sealed record ActiveAgent(
     DateTimeOffset StartedAt,
     DateTimeOffset LastActivityAt);
 
+public sealed record CompletedAgentWork(
+    string CompletionId,
+    string ThreadId,
+    string Type,
+    string Title,
+    string Status,
+    string Model,
+    string Effort,
+    DateTimeOffset StartedAt,
+    DateTimeOffset CompletedAt);
+
+public sealed record AgentActivitySnapshot(
+    IReadOnlyList<ActiveAgent> ActiveAgents,
+    IReadOnlyList<CompletedAgentWork> CompletedAgentWorks);
+
 /// <summary>
 /// Reconstructs live Codex turns from the append-only local rollout stream. A turn is
 /// considered active only while its task_started marker has no matching task_complete
@@ -35,10 +50,13 @@ public sealed class AgentActivityService
     }
 
     public IReadOnlyList<ActiveAgent> Read(IReadOnlyDictionary<string, string>? titles = null, string? sessionsRoot = null)
+        => ReadSnapshot(titles, sessionsRoot).ActiveAgents;
+
+    public AgentActivitySnapshot ReadSnapshot(IReadOnlyDictionary<string, string>? titles = null, string? sessionsRoot = null)
     {
         var now = _now().ToUniversalTime();
         var root = sessionsRoot ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions");
-        if (!Directory.Exists(root)) return [];
+        if (!Directory.Exists(root)) return new([], []);
 
         var cutoff = now - _staleAfter;
         var recentFiles = Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories)
@@ -74,9 +92,18 @@ public sealed class AgentActivityService
             .Select(group => group.OrderByDescending(state => state.LastActivityAt).First())
             .ToArray();
 
-        return OrderHierarchy(activeStates)
+        var activeAgents = OrderHierarchy(activeStates)
             .Select(ordered => ToActiveAgent(ordered.State, ordered.Depth, titles))
             .ToArray();
+        var completedAgents = _cache.Values
+            .Select(value => value.State)
+            .Where(state => !state.IsSubagent && state.CompletedAt is not null && !string.IsNullOrWhiteSpace(state.CompletedTurnId))
+            .GroupBy(state => state.ThreadId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderByDescending(state => state.CompletedAt).First())
+            .OrderByDescending(state => state.CompletedAt)
+            .Select(state => ToCompletedAgentWork(state, titles))
+            .ToArray();
+        return new(activeAgents, completedAgents);
     }
 
     private static IReadOnlyList<OrderedState> OrderHierarchy(IReadOnlyList<RolloutState> states)
@@ -131,6 +158,23 @@ public sealed class AgentActivityService
         return state.IsSubagent ? "Subagent Codex" : "Conversa Codex";
     }
 
+    private static CompletedAgentWork ToCompletedAgentWork(RolloutState state, IReadOnlyDictionary<string, string>? titles)
+    {
+        var title = titles is not null && titles.TryGetValue(state.ThreadId, out var mappedTitle) && !string.IsNullOrWhiteSpace(mappedTitle)
+            ? mappedTitle.Trim()
+            : FallbackTitle(state);
+        return new(
+            state.ThreadId + ":" + state.CompletedTurnId,
+            state.ThreadId,
+            "Agent",
+            title,
+            "Concluído",
+            string.IsNullOrWhiteSpace(state.Model) ? "unknown" : state.Model,
+            string.IsNullOrWhiteSpace(state.Effort) ? "unknown" : state.Effort,
+            state.CompletedStartedAt ?? state.CompletedAt!.Value,
+            state.CompletedAt!.Value);
+    }
+
     private static RolloutState Parse(string path, long offset, RolloutState initial)
     {
         var state = initial;
@@ -173,7 +217,14 @@ public sealed class AgentActivityService
                         break;
                     case "task_complete":
                         var completedTurn = ReadString(payload, "turn_id");
-                        if (string.IsNullOrWhiteSpace(completedTurn) || completedTurn == state.ActiveTurnId) state = state with { ActiveTurnId = null };
+                        if (string.IsNullOrWhiteSpace(completedTurn) || completedTurn == state.ActiveTurnId)
+                            state = state with
+                            {
+                                CompletedTurnId = completedTurn ?? state.ActiveTurnId ?? at.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture),
+                                CompletedStartedAt = state.StartedAt,
+                                CompletedAt = at,
+                                ActiveTurnId = null
+                            };
                         break;
                     case "agent_reasoning":
                         if (state.ActiveTurnId is not null && ReadString(payload, "text") is { } reasoning && !string.IsNullOrWhiteSpace(reasoning)) state = state with { Status = PresentStatus(reasoning) };
@@ -221,8 +272,8 @@ public sealed class AgentActivityService
     private sealed record CachedRollout(RolloutSignature Signature, bool HadFinalNewline, RolloutState State);
     private readonly record struct RolloutSignature(long Length, long LastWriteUtcTicks);
     private sealed record OrderedState(RolloutState State, int Depth);
-    private sealed record RolloutState(string ThreadId, string? ParentThreadId, bool IsSubagent, string? AgentPath, string? AgentNickname, string? ActiveTurnId, DateTimeOffset? StartedAt, DateTimeOffset LastActivityAt, string Model, string Effort, string Status)
+    private sealed record RolloutState(string ThreadId, string? ParentThreadId, bool IsSubagent, string? AgentPath, string? AgentNickname, string? ActiveTurnId, DateTimeOffset? StartedAt, string? CompletedTurnId, DateTimeOffset? CompletedStartedAt, DateTimeOffset? CompletedAt, DateTimeOffset LastActivityAt, string Model, string Effort, string Status)
     {
-        public static RolloutState Empty { get; } = new("", null, false, null, null, null, null, DateTimeOffset.MinValue, "unknown", "unknown", "Trabalhando");
+        public static RolloutState Empty { get; } = new("", null, false, null, null, null, null, null, null, null, DateTimeOffset.MinValue, "unknown", "unknown", "Trabalhando");
     }
 }

@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.13.0] - 2026-08-14
+
+### Added
+
+- The agent list now shows active agents and unread completed principal-agent work together, keeping active rows first and preserving stable row identity across refreshes.
+
+### Changed
+
+- The active-agent count keeps priority while any work is running; the green completion check replaces it only after all active work finishes.
+
+## [0.12.1] - 2026-08-14
+
+### Fixed
+
+- Codex foreground detection now recognizes the desktop app's real packaged `ChatGPT.exe` host, so reading the last completed agent never hides the widget while Codex remains focused.
+- The completed-row check is now an overlay above elapsed time and no longer pushes the time below the reasoning line or changes the agent card structure.
+
+## [0.12.0] - 2026-08-14
+
+### Added
+
+- The widget now follows Codex focus, hiding while Codex is minimized or in the background whenever no agent work is running and no unread completion remains.
+- Completed principal-agent work is persisted as unread, forces the widget visible, and replaces the active-agent count with a green check on a light-green surface.
+- Clicking the completion indicator lists unread principal-agent work; opening a completed chat marks that thread read, while subagent completions stay out of the list.
+- Completed list rows show a green check above their elapsed time, while active work always takes precedence over every other visibility and indicator state.
+- The reasoning glow now takes two seconds to cross an active agent row, followed by a reliable two-second pause without restarting on each activity refresh.
+
+## [0.11.13] - 2026-08-14
+
+### Changed
+
+- All displayed numerical data now uses the same Source Sans 3 family as the weekly percentage, including reset timing, forecasts, costs, ranking, settings exchange rate, version, and chart labels/tooltips.
+
+## [0.11.12] - 2026-08-14
+
+### Changed
+
+- The quota reset countdown now shows the local absolute reset date and time alongside the remaining duration, with localized Portuguese and English formatting.
+
 ## [0.11.11] - 2026-08-14
 
 ### Changed

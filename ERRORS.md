@@ -1,5 +1,12 @@
 # Erros e solucoes conhecidas
 
+## Widget sumia ao ler a última conclusão com o Codex em primeiro plano
+
+- **Sintoma:** ao abrir o último trabalho concluído não lido, o indicador era removido e o widget desaparecia mesmo com a janela do Codex em foco.
+- **Causa:** a janela desktop real pertence a `ChatGPT.exe` dentro do pacote `WindowsApps\OpenAI.Codex_*`; o detector aceitava somente `codex.exe`, que neste host não possui a HWND principal. Depois que o último não lido era removido, o falso estado de background fazia a política ocultar o widget.
+- **Solução:** reconhecer `ChatGPT.exe` e `codex.exe` somente quando pertencem ao pacote/caminho desktop do Codex, preservando a rejeição do CLI app-server. O teste reproduz o caminho real e também rejeita um `ChatGPT.exe` fora do pacote.
+- **Prevenção:** identificar a aplicação pelo pacote e pelo executável que realmente possui a HWND, não pelo nome do processo auxiliar; validar `GetForegroundWindow`, PID e caminho no runtime instalado.
+
 ## Histórico local perdia o modelo antes do primeiro contexto do rollout
 
 - **Sintoma:** tokens podiam permanecer no bucket `unknown` quando o JSONL não incluía `turn_context` antes do primeiro snapshot, embora o estado local do Codex registrasse o modelo da thread.

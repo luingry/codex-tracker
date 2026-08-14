@@ -80,7 +80,7 @@ public sealed class DailyUsageChart : FrameworkElement
             _barHits.Add(new(new Rect(x, 0, Math.Max(width, width + gap), chartHeight), value));
         }
 
-        var typeface = new Typeface(new System.Windows.Media.FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+        var typeface = new Typeface(new System.Windows.Media.FontFamily("./assets/fonts/#Source Sans 3"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
         DrawLabel(drawingContext, "1", 0, chartHeight + 2, typeface);
         var last = days.ToString(CultureInfo.InvariantCulture);
         var formatted = CreateText(last, typeface);

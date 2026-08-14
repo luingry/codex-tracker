@@ -4,7 +4,7 @@
         xmlns:local="clr-namespace:CodexTracker"
         Title="{DynamicResource Loc.AppTitle}"
         Width="62" Height="52" MinWidth="62" MinHeight="52"
-        WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False" ShowActivated="False"
         AllowsTransparency="True" Background="Transparent"
         FontFamily="./assets/fonts/#Atkinson Hyperlegible Next">
   <Border x:Name="WindowSurface" CornerRadius="12" ClipToBounds="True" SnapsToDevicePixels="True">
@@ -58,8 +58,8 @@
             </Grid>
           </Grid>
           <Button x:Name="AgentIndicatorButton" Width="20" Height="20" Padding="0" Margin="0,-1,0,5"
-                  Visibility="{Binding HasActiveAgents, Converter={StaticResource BooleanToVisibility}}"
-                  Click="ToggleAgentList" ToolTip="{DynamicResource Loc.AgentsWorkingTooltip}" AutomationProperties.Name="{DynamicResource Loc.ShowWorkingAgents}">
+                  Visibility="{Binding HasAgentIndicator, Converter={StaticResource BooleanToVisibility}}"
+                  Click="ToggleAgentList" ToolTip="{Binding AgentIndicatorTooltip}" AutomationProperties.Name="{Binding AgentIndicatorTooltip}">
             <Button.Template>
               <ControlTemplate TargetType="Button">
                 <Grid>
@@ -70,6 +70,7 @@
                         <Path.RenderTransform><RotateTransform x:Name="AgentWorkSpinnerRotation" Angle="0" /></Path.RenderTransform>
                       </Path>
                       <TextBlock x:Name="AgentCount" Text="{Binding ActiveAgentCount}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="11.5" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      <Path x:Name="AgentCompletedCheck" Width="10" Height="8" Data="M1,4L4,7L9,1" Stretch="Uniform" Stroke="#168A4A" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
                       <Path x:Name="AgentArrow" Width="9" Height="6" Data="M1,1L5,5L9,1" Stretch="Uniform" Stroke="White" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
                     </Grid>
                   </Border>
@@ -77,6 +78,7 @@
                 <ControlTemplate.Triggers>
                   <Trigger Property="IsMouseOver" Value="True">
                     <Setter TargetName="AgentCount" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="AgentCompletedCheck" Property="Visibility" Value="Collapsed" />
                     <Setter TargetName="AgentArrow" Property="Visibility" Value="Visible" />
                     <Setter TargetName="AgentIndicatorSurface" Property="Opacity" Value=".86" />
                   </Trigger>
@@ -94,6 +96,12 @@
                     </DataTrigger.EnterActions>
                     <DataTrigger.ExitActions><StopStoryboard BeginStoryboardName="AgentWorkSpinnerStoryboard" /></DataTrigger.ExitActions>
                   </DataTrigger>
+                  <DataTrigger Binding="{Binding ShowsCompletedIndicator}" Value="True">
+                    <Setter TargetName="AgentIndicatorSurface" Property="Background" Value="#DDF3E6" />
+                    <Setter TargetName="AgentCount" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="AgentCompletedCheck" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="AgentArrow" Property="Visibility" Value="Collapsed" />
+                  </DataTrigger>
                   <Trigger Property="IsPressed" Value="True"><Setter TargetName="AgentIndicatorSurface" Property="Opacity" Value=".68" /></Trigger>
                 </ControlTemplate.Triggers>
               </ControlTemplate>
@@ -107,7 +115,7 @@
                 <Border.Effect><DropShadowEffect BlurRadius="12" ShadowDepth="3" Opacity=".28" Color="#151A18" /></Border.Effect>
                 <local:RoundedClipBorder x:Name="AgentListClipSurface" Padding="0" CornerRadius="12" Background="{DynamicResource DetailedSurface}" BorderThickness="0">
                   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <ItemsControl ItemsSource="{Binding ActiveAgents}">
+                    <ItemsControl ItemsSource="{Binding AgentItems}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
                       <Button x:Name="AgentRow" Margin="0" Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
@@ -152,7 +160,12 @@
                                   </LinearGradientBrush>
                                 </TextBlock.Foreground>
                               </TextBlock>
-                              <TextBlock Grid.Column="1" Text="{Binding Elapsed}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9.2" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                              <Grid Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding Elapsed}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9.2" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Right" />
+                                <Path x:Name="CompletedRowCheck" Width="9" Height="7" Data="M1,4L4,7L9,1" Stretch="Uniform" Stroke="#168A4A" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Right" VerticalAlignment="Center" Visibility="Collapsed" IsHitTestVisible="False">
+                                  <Path.RenderTransform><TranslateTransform Y="-9" /></Path.RenderTransform>
+                                </Path>
+                              </Grid>
                             </Grid>
                           </Grid>
                         </Border>
@@ -174,13 +187,17 @@
                               <Storyboard RepeatBehavior="Forever">
                                 <DoubleAnimationUsingKeyFrames Storyboard.TargetName="ReasoningGlowTransform" Storyboard.TargetProperty="X">
                                   <LinearDoubleKeyFrame KeyTime="0:0:0" Value="-64" />
-                                  <LinearDoubleKeyFrame KeyTime="0:0:1.30" Value="268" />
-                                  <DiscreteDoubleKeyFrame KeyTime="0:0:3.30" Value="268" />
+                                  <LinearDoubleKeyFrame KeyTime="0:0:2.00" Value="268" />
+                                  <DiscreteDoubleKeyFrame KeyTime="0:0:4.00" Value="268" />
                                 </DoubleAnimationUsingKeyFrames>
                               </Storyboard>
                             </BeginStoryboard>
                           </DataTrigger.EnterActions>
                           <DataTrigger.ExitActions><StopStoryboard BeginStoryboardName="ReasoningGlowStoryboard" /></DataTrigger.ExitActions>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsCompleted}" Value="True">
+                          <Setter TargetName="CompletedRowCheck" Property="Visibility" Value="Visible" />
+                          <Setter TargetName="ReasoningGlow" Property="Visibility" Value="Collapsed" />
                         </DataTrigger>
                       </DataTemplate.Triggers>
                     </DataTemplate>
@@ -207,8 +224,8 @@
               </Grid>
               <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="11,0,0,0">
                 <TextBlock Text="{DynamicResource Loc.Weekly}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" />
-                <TextBlock Text="{Binding Reset}" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource SoftInk}" Margin="0,3,0,0" />
-                <TextBlock Text="{Binding Forecast}" FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0">
+                <TextBlock Text="{Binding Reset}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource SoftInk}" Margin="0,3,0,0" />
+                <TextBlock Text="{Binding Forecast}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0">
                   <TextBlock.Style>
                     <Style TargetType="TextBlock">
                       <Setter Property="Foreground" Value="{DynamicResource SoftInk}" />
@@ -234,13 +251,13 @@
               <TextBlock Grid.Row="1" Text="{Binding Today}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" TextTrimming="CharacterEllipsis" />
               <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding WeeklyTokens}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" Margin="7,0" TextTrimming="CharacterEllipsis" />
               <TextBlock Grid.Row="1" Grid.Column="4" Text="{Binding Month}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" Margin="7,0,0,0" TextTrimming="CharacterEllipsis" />
-              <TextBlock Grid.Row="2" Text="{Binding TodayCost}" FontSize="9" Foreground="{DynamicResource SoftInk}" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
-              <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding WeeklyCost}" FontSize="9" Foreground="{DynamicResource SoftInk}" Margin="7,1" TextTrimming="CharacterEllipsis" />
-              <TextBlock Grid.Row="2" Grid.Column="4" Text="{Binding MonthCost}" FontSize="9" Foreground="{DynamicResource SoftInk}" Margin="7,1,0,0" TextTrimming="CharacterEllipsis" />
+              <TextBlock Grid.Row="2" Text="{Binding TodayCost}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9" Foreground="{DynamicResource SoftInk}" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+              <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding WeeklyCost}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9" Foreground="{DynamicResource SoftInk}" Margin="7,1" TextTrimming="CharacterEllipsis" />
+              <TextBlock Grid.Row="2" Grid.Column="4" Text="{Binding MonthCost}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9" Foreground="{DynamicResource SoftInk}" Margin="7,1,0,0" TextTrimming="CharacterEllipsis" />
               <Border Grid.Column="1" Grid.RowSpan="3" Width="1" Background="{DynamicResource GaugeTrack}" Margin="0,2,0,1" />
               <Border Grid.Column="3" Grid.RowSpan="3" Width="1" Background="{DynamicResource GaugeTrack}" Margin="0,2,0,1" />
             </Grid>
-            <TextBlock Text="{Binding Coverage}" FontSize="10" Foreground="{DynamicResource SoftInk}" Margin="0,4,0,12" />
+            <TextBlock Text="{Binding Coverage}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" Foreground="{DynamicResource SoftInk}" Margin="0,4,0,12" />
             <Grid Margin="0,10,0,3">
               <TextBlock Text="{DynamicResource Loc.UsageRanking}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" />
               <Grid HorizontalAlignment="Right" Height="24" Width="144">
@@ -276,7 +293,7 @@
               </Grid>
             </Grid>
             <ItemsControl ItemsSource="{Binding Ranking}" Margin="0,0,0,0">
-              <ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,3"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="72" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Model}" FontSize="11" Foreground="{DynamicResource Ink}" TextTrimming="CharacterEllipsis" /><StackPanel Grid.Column="1" HorizontalAlignment="Right"><TextBlock Text="{Binding Tokens}" FontSize="10" Foreground="{DynamicResource Ink}" HorizontalAlignment="Right" /><TextBlock Text="{Binding SecondaryText}" FontSize="8" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Right" /></StackPanel></Grid><ProgressBar Value="{Binding Fraction}" Maximum="1" Height="4" Background="{DynamicResource Sage}" Foreground="{DynamicResource Accent}" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
+              <ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,3"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="72" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Model}" FontSize="11" Foreground="{DynamicResource Ink}" TextTrimming="CharacterEllipsis" /><StackPanel Grid.Column="1" HorizontalAlignment="Right"><TextBlock Text="{Binding Tokens}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" Foreground="{DynamicResource Ink}" HorizontalAlignment="Right" /><TextBlock Text="{Binding SecondaryText}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="8" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Right" /></StackPanel></Grid><ProgressBar Value="{Binding Fraction}" Maximum="1" Height="4" Background="{DynamicResource Sage}" Foreground="{DynamicResource Accent}" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
             </ItemsControl>
             <StackPanel Margin="0,13,0,0">
               <TextBlock Text="{DynamicResource Loc.DailyUsageCurrentMonth}" FontSize="9" Foreground="{DynamicResource SoftInk}" Margin="0,0,0,5" />
@@ -287,7 +304,7 @@
                                      TooltipTextBrush="{DynamicResource Ink}" />
             </StackPanel>
             <TextBlock Text="{Binding Status}" FontSize="9" Foreground="{DynamicResource Accent}" Margin="0,10,0,2" />
-            <TextBlock Text="{Binding AppVersion}" FontSize="12" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Center" Margin="0,7,0,0" />
+            <TextBlock Text="{Binding AppVersion}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="12" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Center" Margin="0,7,0,0" />
           </StackPanel>
         </ScrollViewer>
 
@@ -326,7 +343,7 @@
                     </Grid>
                   </Button>
                   <TextBlock Text="{DynamicResource Loc.Currency}" Style="{StaticResource SettingsLabelStyle}" Margin="0,18,0,4" /><ComboBox x:Name="CurrencyBox" SelectionChanged="CurrencyChanged"><ComboBoxItem Tag="BRL">BRL (R$)</ComboBoxItem><ComboBoxItem Tag="USD">USD (US$)</ComboBoxItem></ComboBox>
-                  <StackPanel x:Name="RatePanel"><TextBlock Text="{DynamicResource Loc.UsdBrlRate}" Style="{StaticResource SettingsLabelStyle}" Margin="0,16,0,4" /><TextBox x:Name="RateBox" /></StackPanel>
+                  <StackPanel x:Name="RatePanel"><TextBlock Text="{DynamicResource Loc.UsdBrlRate}" Style="{StaticResource SettingsLabelStyle}" Margin="0,16,0,4" /><TextBox x:Name="RateBox" FontFamily="./assets/fonts/#Source Sans 3" /></StackPanel>
                   <StackPanel x:Name="CodexPathFallbackPanel" Visibility="Collapsed"><TextBlock Text="{DynamicResource Loc.CodexPath}" Style="{StaticResource SettingsLabelStyle}" Margin="0,16,0,4" /><TextBox x:Name="PathBox" /><Button Click="Browse" Content="{DynamicResource Loc.Browse}" Padding="10,7" Margin="0,12,0,0" HorizontalAlignment="Left" /></StackPanel>
                   <Button Click="OpenLog" Content="{DynamicResource Loc.OpenLog}" Padding="10,7" Margin="0,12,0,7" HorizontalAlignment="Left" />
                 </StackPanel>

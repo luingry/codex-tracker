@@ -4,7 +4,7 @@ using CodexTracker.Core;
 
 namespace CodexTracker;
 
-public sealed record AppSettings(double Left = 80, double Top = 80, double Width = 62, double Height = 52, bool IsExpanded = false, bool IsTopmost = true, string? CodexPath = null, decimal UsdBrl = 5.50m, string Theme = "Claro", string CurrencyCode = "BRL", WidgetModeSizes? ModeSizes = null, bool IsAgentListExpanded = false, string AccentColor = AccentPalette.DefaultBaseHex, string LanguageCode = LocalizationManager.DefaultLanguageCode);
+public sealed record AppSettings(double Left = 80, double Top = 80, double Width = 62, double Height = 52, bool IsExpanded = false, bool IsTopmost = true, string? CodexPath = null, decimal UsdBrl = 5.50m, string Theme = "Claro", string CurrencyCode = "BRL", WidgetModeSizes? ModeSizes = null, bool IsAgentListExpanded = false, string AccentColor = AccentPalette.DefaultBaseHex, string LanguageCode = LocalizationManager.DefaultLanguageCode, IReadOnlyList<CompletedAgentWork>? UnreadAgentWorks = null);
 public sealed class SettingsStore
 {
     private readonly string _path;
@@ -26,6 +26,13 @@ public sealed class SettingsStore
             CurrencyCode = CurrencyPresentation.Normalize(settings.CurrencyCode),
             AccentColor = AccentPalette.Normalize(settings.AccentColor),
             LanguageCode = LocalizationManager.NormalizeLanguage(settings.LanguageCode),
+            UnreadAgentWorks = (settings.UnreadAgentWorks ?? [])
+                .Where(item => !string.IsNullOrWhiteSpace(item.CompletionId) && !string.IsNullOrWhiteSpace(item.ThreadId))
+                .GroupBy(item => item.CompletionId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.OrderByDescending(item => item.CompletedAt).First())
+                .OrderByDescending(item => item.CompletedAt)
+                .Take(50)
+                .ToArray(),
             Width = active.Width,
             Height = active.Height,
             ModeSizes = slots

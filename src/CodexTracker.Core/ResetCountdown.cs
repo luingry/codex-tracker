@@ -11,8 +11,15 @@ public static class ResetCountdown
         var span = resetsAt.Value - now;
         if (span <= TimeSpan.Zero) return isEnglish ? "resetting now" : "reiniciando agora";
         var prefix = isEnglish ? "resets in" : "reinicia em";
-        if (span.TotalDays >= 1) return $"{prefix} {(int)span.TotalDays}d {span.Hours}h";
-        if (span.TotalHours >= 1) return $"{prefix} {span.Hours}h {span.Minutes}m";
-        return $"{prefix} {Math.Max(1, (int)Math.Ceiling(span.TotalMinutes))}m";
+        var countdown = span.TotalDays >= 1
+            ? $"{(int)span.TotalDays}d {span.Hours}h"
+            : span.TotalHours >= 1
+                ? $"{span.Hours}h {span.Minutes}m"
+                : $"{Math.Max(1, (int)Math.Ceiling(span.TotalMinutes))}m";
+        var localReset = resetsAt.Value.ToLocalTime();
+        var absoluteReset = isEnglish
+            ? localReset.ToString("MM/dd 'at' h:mm tt", System.Globalization.CultureInfo.GetCultureInfo("en-US"))
+            : localReset.ToString("dd/MM 'as' HH:mm'h'", System.Globalization.CultureInfo.GetCultureInfo("pt-BR"));
+        return $"{prefix} {countdown} ({absoluteReset})";
     }
 }
