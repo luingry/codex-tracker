@@ -384,7 +384,9 @@ public partial class MainWindow : Window
         CurrencyBox.SelectedIndex = SettingsStore.NormalizeCurrency(_settings.CurrencyCode) == "USD" ? 1 : 0;
         UpdateCurrencyRateVisibility();
         RateBox.Text = _settings.UsdBrl.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        PathBox.Text = _settings.CodexPath ?? "";
+        var automaticallyDetectedPath = CodexExecutableDiscovery.Find(null);
+        CodexPathFallbackPanel.Visibility = automaticallyDetectedPath is null ? Visibility.Visible : Visibility.Collapsed;
+        PathBox.Text = automaticallyDetectedPath ?? _settings.CodexPath ?? "";
         CaptureCurrentModeSize();
         SettingsPanel.Visibility = Visibility.Visible;
         ApplyWindowModeSize();
@@ -423,23 +425,7 @@ public partial class MainWindow : Window
             (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(normalized));
     }
     private void Browse(object sender, RoutedEventArgs e) { var dialog = new Microsoft.Win32.OpenFileDialog(); if (dialog.ShowDialog() == true) PathBox.Text = dialog.FileName; }
-    private void AutoDetect(object sender, RoutedEventArgs e) => PathBox.Text = CodexExecutableDiscovery.Find(null) ?? "";
     private void OpenLog(object sender, RoutedEventArgs e) { Directory.CreateDirectory(Path.GetDirectoryName(SanitizedLogger.LogPath)!); Process.Start(new ProcessStartInfo("notepad.exe", SanitizedLogger.LogPath) { UseShellExecute = true }); }
-    private async void TestPath(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (!File.Exists(PathBox.Text)) throw new FileNotFoundException();
-            await using var probe = new CodexAppServerClient(PathBox.Text);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            await probe.StartAsync(timeout.Token);
-            var weekly = probe.Snapshot?.Windows.FirstOrDefault(x => x.Id == "codex:primary" && x.WindowDurationMins >= 10000);
-            _viewModel.Status = weekly is null
-                ? LocalizationManager.Text("ConnectedWeeklyUnavailable")
-                : LocalizationManager.Format("ConnectedWeeklyRemaining", QuotaPresentation.FormatWeeklyRemaining(weekly));
-        }
-        catch (Exception exception) { _viewModel.Status = LocalizationManager.Text("TestFailed"); SanitizedLogger.Write("Path test error: " + exception.GetType().Name); }
-    }
     private void ApplySettings(object sender, RoutedEventArgs e)
     {
         CaptureCurrentModeSize();
@@ -447,7 +433,10 @@ public partial class MainWindow : Window
         var theme = ThemeToggle.IsChecked == true ? "Escuro" : "Claro";
         var currency = SettingsStore.NormalizeCurrency((CurrencyBox.SelectedItem as ComboBoxItem)?.Tag as string);
         var language = LocalizationManager.NormalizeLanguage((LanguageBox.SelectedItem as ComboBoxItem)?.Tag as string);
-        _settings = _settings with { CodexPath = string.IsNullOrWhiteSpace(PathBox.Text) ? null : PathBox.Text, UsdBrl = rate > 0 ? rate : 5.5m, Theme = theme, CurrencyCode = currency, AccentColor = AccentPalette.Normalize(_pendingAccentColor), LanguageCode = language };
+        var manualCodexPath = CodexPathFallbackPanel.Visibility == Visibility.Visible
+            ? string.IsNullOrWhiteSpace(PathBox.Text) ? null : PathBox.Text
+            : _settings.CodexPath;
+        _settings = _settings with { CodexPath = manualCodexPath, UsdBrl = rate > 0 ? rate : 5.5m, Theme = theme, CurrencyCode = currency, AccentColor = AccentPalette.Normalize(_pendingAccentColor), LanguageCode = language };
         LocalizationManager.Apply(language);
         ThemeManager.Apply(theme, _settings.AccentColor);
         CreateTray();

@@ -11,6 +11,7 @@
     <SolidColorBrush x:Key="Apricot" Color="#F7D6B9" />
     <SolidColorBrush x:Key="Lavender" Color="#DFD7F1" />
     <SolidColorBrush x:Key="Accent" Color="#0D8F6F" />
+    <SolidColorBrush x:Key="AgentMetadataAccent" Color="#367E6E" />
     <Color x:Key="AccentGlow">#2BA98A</Color>
     <SolidColorBrush x:Key="RiskWarning" Color="#B66A00" />
     <SolidColorBrush x:Key="GaugeTrack" Color="#CCD5D1" />
@@ -51,11 +52,12 @@
       <Setter Property="BorderThickness" Value="0" />
       <Setter Property="Padding" Value="9,6" />
       <Setter Property="Foreground" Value="{DynamicResource Ink}" />
+      <Setter Property="MinHeight" Value="34" />
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="TextBox">
             <Border Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
-              <ScrollViewer x:Name="PART_ContentHost" />
+              <ScrollViewer x:Name="PART_ContentHost" Foreground="{TemplateBinding Foreground}" />
             </Border>
           </ControlTemplate>
         </Setter.Value>
@@ -67,7 +69,7 @@
       <Setter Property="BorderThickness" Value="0" />
       <Setter Property="Padding" Value="10,6" />
       <Setter Property="Foreground" Value="{DynamicResource Ink}" />
-      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="MinHeight" Value="34" />
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ComboBox">
@@ -78,8 +80,9 @@
                   <ControlTemplate TargetType="ToggleButton">
                     <Border x:Name="Surface" Background="{TemplateBinding Background}" CornerRadius="9" Padding="{TemplateBinding Padding}">
                       <Grid>
-                        <ContentPresenter Content="{Binding SelectionBoxItem, RelativeSource={RelativeSource AncestorType=ComboBox}}" VerticalAlignment="Center" />
-                        <Path Data="M8,10L12,14L16,10" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="24" /></Grid.ColumnDefinitions>
+                        <ContentPresenter Content="{Binding SelectionBoxItem, RelativeSource={RelativeSource AncestorType=ComboBox}}" Margin="0,0,4,0" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}" />
+                        <Path Grid.Column="1" Data="M7,9L12,14L17,9" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center" />
                       </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -108,7 +111,7 @@
         <Setter.Value>
           <ControlTemplate TargetType="ComboBoxItem">
             <Border x:Name="Surface" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}">
-              <ContentPresenter VerticalAlignment="Center" />
+              <ContentPresenter VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}" />
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource HoverSurface}" /></Trigger>

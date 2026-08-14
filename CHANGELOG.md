@@ -6,12 +6,15 @@
 
 - Configurações agora oferecem um seletor nativo de cor de destaque. Uma única cor-base persistida gera automaticamente variantes acessíveis para destaque, superfícies suaves, hover e glow nos temas claro e escuro.
 - A interface agora pode ser alternada entre `pt-BR` e `en-US` nas configurações, incluindo textos, tray, estados, tooltips, previsões, contagem regressiva e formatação numérica.
+- O painel de configurações recebeu polimento de ritmo, contraste e alinhamento dos campos; o caminho manual do Codex agora só aparece como fallback após falhar a auto-detecção, enquanto o acesso ao log permanece disponível.
 
 ### Fixed
 
 - A lista de agents permanece totalmente fechada no modo detalhado, inclusive quando um novo agent começa a trabalhar depois da troca de modo.
 - Hover e ripple das linhas de agents/subagents agora ocupam toda a largura do wrapper, com respiro vertical ao redor do texto sem perder a indentação hierárquica.
 - O glow de trabalho não aparece mais nas barras do ranking; ele permanece exclusivo do gauge semanal de quota.
+- O seletor de período Dia/Semana/Mês do ranking agora sinaliza interação com cursor de mão no hover.
+- Modelo e effort na lista de agents agora usam uma variante menos saturada, mas com contraste garantido, da cor de destaque escolhida.
 
 ## [0.10.6] - 2026-08-14
 

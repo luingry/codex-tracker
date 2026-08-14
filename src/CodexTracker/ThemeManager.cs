@@ -18,6 +18,7 @@ internal static class ThemeManager
         Set("Apricot", dark ? "#4C3B31" : "#F0DED0");
         Set("Lavender", dark ? "#37343D" : "#EAE8EF");
         Set("Accent", accent.AccentHex);
+        Set("AgentMetadataAccent", accent.AgentMetadataHex);
         SetColor("AccentGlow", accent.GlowHex);
         Set("RiskWarning", dark ? "#FFD166" : "#B66A00");
         Set("GaugeTrack", dark ? "#46504C" : "#CCD5D1");

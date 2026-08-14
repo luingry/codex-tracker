@@ -130,7 +130,7 @@
                                 </TextBlock.Foreground>
                               </TextBlock>
                             </Grid>
-                            <TextBlock Grid.Row="3" Text="{Binding ModelAndEffort}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9.2" Foreground="{DynamicResource SoftInk}" TextTrimming="CharacterEllipsis" Margin="0,3.4,0,0" />
+                            <TextBlock Grid.Row="3" Text="{Binding ModelAndEffort}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9.2" Foreground="{DynamicResource AgentMetadataAccent}" TextTrimming="CharacterEllipsis" Margin="0,3.4,0,0" />
                           </Grid>
                         </Border>
                       </Button>
@@ -236,6 +236,7 @@
                   <Grid.Resources>
                     <Style TargetType="RadioButton">
                       <Setter Property="Background" Value="Transparent" />
+                      <Setter Property="Cursor" Value="Hand" />
                       <Setter Property="FontSize" Value="9" />
                       <Setter Property="HorizontalContentAlignment" Value="Center" />
                       <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -284,29 +285,29 @@
                 <TextBlock Text="{DynamicResource Loc.Settings}" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" />
                 <Button HorizontalAlignment="Right" Click="Settings" ToolTip="{DynamicResource Loc.CloseSettings}" AutomationProperties.Name="{DynamicResource Loc.CloseSettings}" Padding="5"><Viewbox Width="15" Height="15"><Canvas Width="24" Height="24"><Path Data="M18,6L6,18M6,6L18,18" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /></Canvas></Viewbox></Button>
               </Grid>
-              <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,16,0,12">
+              <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,15,0,14">
                 <StackPanel>
                   <CheckBox x:Name="DetailedBox" Content="{DynamicResource Loc.DetailedMode}" Foreground="{DynamicResource Ink}" />
-                  <CheckBox x:Name="TopmostBox" Content="{DynamicResource Loc.AlwaysOnTop}" Foreground="{DynamicResource Ink}" Margin="0,8,0,0" />
-                  <Grid Margin="0,16,0,3"><TextBlock Text="{DynamicResource Loc.DarkTheme}" Foreground="{DynamicResource SoftInk}" VerticalAlignment="Center" /><CheckBox x:Name="ThemeToggle" Content="{DynamicResource Loc.DarkTheme}" HorizontalAlignment="Right" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.DarkTheme}" ToolTip="{DynamicResource Loc.ToggleTheme}" Checked="PreviewTheme" Unchecked="PreviewTheme" /></Grid>
-                  <TextBlock Text="{DynamicResource Loc.Language}" Foreground="{DynamicResource SoftInk}" Margin="0,14,0,3" />
+                  <CheckBox x:Name="TopmostBox" Content="{DynamicResource Loc.AlwaysOnTop}" Foreground="{DynamicResource Ink}" Margin="0,9,0,0" />
+                  <Grid Margin="0,18,0,2"><TextBlock Text="{DynamicResource Loc.DarkTheme}" Foreground="{DynamicResource SoftInk}" VerticalAlignment="Center" /><CheckBox x:Name="ThemeToggle" Content="{DynamicResource Loc.DarkTheme}" HorizontalAlignment="Right" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.DarkTheme}" ToolTip="{DynamicResource Loc.ToggleTheme}" Checked="PreviewTheme" Unchecked="PreviewTheme" /></Grid>
+                  <TextBlock Text="{DynamicResource Loc.Language}" Foreground="{DynamicResource SoftInk}" Margin="0,16,0,4" />
                   <ComboBox x:Name="LanguageBox" SelectionChanged="PreviewLanguage"><ComboBoxItem Tag="pt-BR">Português (Brasil)</ComboBoxItem><ComboBoxItem Tag="en-US">English (United States)</ComboBoxItem></ComboBox>
-                  <TextBlock Text="{DynamicResource Loc.AccentColor}" Foreground="{DynamicResource SoftInk}" Margin="0,14,0,3" />
-                  <Button x:Name="AccentColorButton" Click="ChooseAccentColor" HorizontalContentAlignment="Stretch" Padding="8,6" ToolTip="{DynamicResource Loc.ChooseAccentColorTooltip}" AutomationProperties.Name="{DynamicResource Loc.ChooseAccentColor}">
+                  <TextBlock Text="{DynamicResource Loc.AccentColor}" Foreground="{DynamicResource SoftInk}" Margin="0,16,0,4" />
+                  <Button x:Name="AccentColorButton" Click="ChooseAccentColor" HorizontalContentAlignment="Stretch" Padding="10,8" ToolTip="{DynamicResource Loc.ChooseAccentColorTooltip}" AutomationProperties.Name="{DynamicResource Loc.ChooseAccentColor}">
                     <Grid>
-                      <Grid.ColumnDefinitions><ColumnDefinition Width="22" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                      <Ellipse x:Name="AccentColorSwatch" Width="14" Height="14" Fill="{DynamicResource Accent}" HorizontalAlignment="Left" />
-                      <TextBlock Grid.Column="1" Text="{DynamicResource Loc.ChooseAccentColor}" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" />
-                      <TextBlock x:Name="AccentColorValue" Grid.Column="2" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" Foreground="{DynamicResource SoftInk}" VerticalAlignment="Center" />
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="28" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                      <Ellipse x:Name="AccentColorSwatch" Width="18" Height="18" Fill="{DynamicResource Accent}" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="1" Text="{DynamicResource Loc.ChooseAccentColor}" FontSize="12" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" />
+                      <TextBlock x:Name="AccentColorValue" Grid.Column="2" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" VerticalAlignment="Center" Margin="12,0,0,0" />
                     </Grid>
                   </Button>
-                  <TextBlock Text="{DynamicResource Loc.Currency}" Foreground="{DynamicResource SoftInk}" Margin="0,14,0,3" /><ComboBox x:Name="CurrencyBox" SelectionChanged="CurrencyChanged"><ComboBoxItem Tag="BRL">BRL (R$)</ComboBoxItem><ComboBoxItem Tag="USD">USD (US$)</ComboBoxItem></ComboBox>
-                  <StackPanel x:Name="RatePanel"><TextBlock Text="{DynamicResource Loc.UsdBrlRate}" Foreground="{DynamicResource SoftInk}" Margin="0,14,0,3" /><TextBox x:Name="RateBox" /></StackPanel>
-                  <TextBlock Text="{DynamicResource Loc.CodexPath}" Foreground="{DynamicResource SoftInk}" Margin="0,14,0,3" /><TextBox x:Name="PathBox" />
-                  <WrapPanel Margin="0,12,0,0"><Button Click="Browse" Content="{DynamicResource Loc.Browse}" /><Button Click="AutoDetect" Content="{DynamicResource Loc.AutoDetect}" /><Button Click="TestPath" Content="{DynamicResource Loc.Test}" /><Button Click="OpenLog" Content="{DynamicResource Loc.OpenLog}" /></WrapPanel>
+                  <TextBlock Text="{DynamicResource Loc.Currency}" Foreground="{DynamicResource SoftInk}" Margin="0,18,0,4" /><ComboBox x:Name="CurrencyBox" SelectionChanged="CurrencyChanged"><ComboBoxItem Tag="BRL">BRL (R$)</ComboBoxItem><ComboBoxItem Tag="USD">USD (US$)</ComboBoxItem></ComboBox>
+                  <StackPanel x:Name="RatePanel"><TextBlock Text="{DynamicResource Loc.UsdBrlRate}" Foreground="{DynamicResource SoftInk}" Margin="0,16,0,4" /><TextBox x:Name="RateBox" /></StackPanel>
+                  <StackPanel x:Name="CodexPathFallbackPanel" Visibility="Collapsed"><TextBlock Text="{DynamicResource Loc.CodexPath}" Foreground="{DynamicResource SoftInk}" Margin="0,16,0,4" /><TextBox x:Name="PathBox" /><Button Click="Browse" Content="{DynamicResource Loc.Browse}" Padding="10,7" Margin="0,12,0,0" HorizontalAlignment="Left" /></StackPanel>
+                  <Button Click="OpenLog" Content="{DynamicResource Loc.OpenLog}" Padding="10,7" Margin="0,12,0,7" HorizontalAlignment="Left" />
                 </StackPanel>
               </ScrollViewer>
-              <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"><Button Click="Settings" Content="{DynamicResource Loc.Cancel}" /><Button Click="ApplySettings" Content="{DynamicResource Loc.Apply}" Background="{DynamicResource Sage}" Foreground="{DynamicResource Ink}" /></StackPanel>
+              <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"><Button Click="Settings" Content="{DynamicResource Loc.Cancel}" Padding="12,7" Margin="0,0,8,0" /><Button Click="ApplySettings" Content="{DynamicResource Loc.Apply}" Padding="12,7" Background="{DynamicResource Sage}" Foreground="{DynamicResource Ink}" /></StackPanel>
             </Grid>
           </Border>
         </Grid>

@@ -205,6 +205,13 @@
 - **Solução:** uma única instância de `NotifyIcon` é preservada; ícone e menu novos são atribuídos antes que os anteriores sejam descartados, e os recursos finais também são liberados no fechamento.
 - **Prevenção:** trate objetos nativos atribuídos a componentes WinForms como recursos com ownership explícito. Testes estruturais cobrem a troca e o descarte em preview repetido e no shutdown.
 
+## Teste de entrada de agent dependia da preferência visual do runner
+
+- **Sintoma:** o workflow de release falhava no teste de linha nova, embora a suíte passasse na máquina local.
+- **Causa:** `SystemParameters.ClientAreaAnimation` é falso no runner GitHub Actions; o teste esperava animação ativa sem controlar essa entrada ambiental.
+- **Solução:** `ApplyAgents` aceita uma preferência opcional injetável para testes, enquanto produção continua consultando o Windows. Os testes cobrem explicitamente animação habilitada e reduced motion.
+- **Prevenção:** parâmetros de acessibilidade do sistema operacional devem ser entradas controláveis em testes determinísticos; não derive uma expectativa fixa do ambiente do runner.
+
 ## Chevron de hover do indicador de agentes não aparecia após o ajuste de estado aberto
 
 - **Sintoma:** o indicador mostrava apenas o número em hover, especialmente com a lista aberta.

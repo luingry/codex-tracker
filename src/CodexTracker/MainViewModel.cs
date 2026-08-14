@@ -126,7 +126,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public bool IsRankingWeek { get => _rankingPeriod == RankingPeriod.Week; set { if (value) SetRankingPeriod(RankingPeriod.Week); } }
     public bool IsRankingMonth { get => _rankingPeriod == RankingPeriod.Month; set { if (value) SetRankingPeriod(RankingPeriod.Month); } }
 
-    public void ApplyAgents(IReadOnlyList<ActiveAgent> agents, DateTimeOffset now, bool animateNewRows)
+    public void ApplyAgents(IReadOnlyList<ActiveAgent> agents, DateTimeOffset now, bool animateNewRows, bool? animationsEnabled = null)
     {
         var hasActiveAgents = agents.Count > 0;
         var existing = ActiveAgents.ToDictionary(row => row.ThreadId, StringComparer.OrdinalIgnoreCase);
@@ -134,7 +134,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         foreach (var agent in agents)
         {
             if (existing.TryGetValue(agent.ThreadId, out var row)) row.Update(agent, now);
-            else row = new AgentActivityRow(agent, now, animateNewRows && SystemParameters.ClientAreaAnimation);
+            else row = new AgentActivityRow(agent, now, animateNewRows && (animationsEnabled ?? SystemParameters.ClientAreaAnimation));
             ordered.Add(row);
         }
         for (var index = 0; index < ordered.Count; index++)
