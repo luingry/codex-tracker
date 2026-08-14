@@ -15,6 +15,7 @@
 - O glow de trabalho não aparece mais nas barras do ranking; ele permanece exclusivo do gauge semanal de quota.
 - O seletor de período Dia/Semana/Mês do ranking agora sinaliza interação com cursor de mão no hover.
 - Modelo e effort na lista de agents agora usam uma variante menos saturada, mas com contraste garantido, da cor de destaque escolhida.
+- Labels do painel de configurações agora compartilham tipografia e cor semântica; checkboxes têm respiro maior e ComboBox preserva texto contrastante nos temas claro e escuro.
 
 ## [0.10.6] - 2026-08-14
 

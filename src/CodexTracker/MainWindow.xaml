@@ -289,10 +289,10 @@
                 <StackPanel>
                   <CheckBox x:Name="DetailedBox" Content="{DynamicResource Loc.DetailedMode}" Foreground="{DynamicResource Ink}" />
                   <CheckBox x:Name="TopmostBox" Content="{DynamicResource Loc.AlwaysOnTop}" Foreground="{DynamicResource Ink}" Margin="0,9,0,0" />
-                  <Grid Margin="0,18,0,2"><TextBlock Text="{DynamicResource Loc.DarkTheme}" Foreground="{DynamicResource SoftInk}" VerticalAlignment="Center" /><CheckBox x:Name="ThemeToggle" Content="{DynamicResource Loc.DarkTheme}" HorizontalAlignment="Right" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.DarkTheme}" ToolTip="{DynamicResource Loc.ToggleTheme}" Checked="PreviewTheme" Unchecked="PreviewTheme" /></Grid>
-                  <TextBlock Text="{DynamicResource Loc.Language}" Foreground="{DynamicResource SoftInk}" Margin="0,16,0,4" />
+                  <Grid Margin="0,18,0,2"><TextBlock Text="{DynamicResource Loc.DarkTheme}" Style="{StaticResource SettingsLabelStyle}" VerticalAlignment="Center" /><CheckBox x:Name="ThemeToggle" Content="{DynamicResource Loc.DarkTheme}" HorizontalAlignment="Right" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.DarkTheme}" ToolTip="{DynamicResource Loc.ToggleTheme}" Checked="PreviewTheme" Unchecked="PreviewTheme" /></Grid>
+                  <TextBlock Text="{DynamicResource Loc.Language}" Style="{StaticResource SettingsLabelStyle}" Margin="0,16,0,4" />
                   <ComboBox x:Name="LanguageBox" SelectionChanged="PreviewLanguage"><ComboBoxItem Tag="pt-BR">Português (Brasil)</ComboBoxItem><ComboBoxItem Tag="en-US">English (United States)</ComboBoxItem></ComboBox>
-                  <TextBlock Text="{DynamicResource Loc.AccentColor}" Foreground="{DynamicResource SoftInk}" Margin="0,16,0,4" />
+                  <TextBlock Text="{DynamicResource Loc.AccentColor}" Style="{StaticResource SettingsLabelStyle}" Margin="0,16,0,4" />
                   <Button x:Name="AccentColorButton" Click="ChooseAccentColor" HorizontalContentAlignment="Stretch" Padding="10,8" ToolTip="{DynamicResource Loc.ChooseAccentColorTooltip}" AutomationProperties.Name="{DynamicResource Loc.ChooseAccentColor}">
                     <Grid>
                       <Grid.ColumnDefinitions><ColumnDefinition Width="28" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
@@ -301,9 +301,9 @@
                       <TextBlock x:Name="AccentColorValue" Grid.Column="2" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" VerticalAlignment="Center" Margin="12,0,0,0" />
                     </Grid>
                   </Button>
-                  <TextBlock Text="{DynamicResource Loc.Currency}" Foreground="{DynamicResource SoftInk}" Margin="0,18,0,4" /><ComboBox x:Name="CurrencyBox" SelectionChanged="CurrencyChanged"><ComboBoxItem Tag="BRL">BRL (R$)</ComboBoxItem><ComboBoxItem Tag="USD">USD (US$)</ComboBoxItem></ComboBox>
-                  <StackPanel x:Name="RatePanel"><TextBlock Text="{DynamicResource Loc.UsdBrlRate}" Foreground="{DynamicResource SoftInk}" Margin="0,16,0,4" /><TextBox x:Name="RateBox" /></StackPanel>
-                  <StackPanel x:Name="CodexPathFallbackPanel" Visibility="Collapsed"><TextBlock Text="{DynamicResource Loc.CodexPath}" Foreground="{DynamicResource SoftInk}" Margin="0,16,0,4" /><TextBox x:Name="PathBox" /><Button Click="Browse" Content="{DynamicResource Loc.Browse}" Padding="10,7" Margin="0,12,0,0" HorizontalAlignment="Left" /></StackPanel>
+                  <TextBlock Text="{DynamicResource Loc.Currency}" Style="{StaticResource SettingsLabelStyle}" Margin="0,18,0,4" /><ComboBox x:Name="CurrencyBox" SelectionChanged="CurrencyChanged"><ComboBoxItem Tag="BRL">BRL (R$)</ComboBoxItem><ComboBoxItem Tag="USD">USD (US$)</ComboBoxItem></ComboBox>
+                  <StackPanel x:Name="RatePanel"><TextBlock Text="{DynamicResource Loc.UsdBrlRate}" Style="{StaticResource SettingsLabelStyle}" Margin="0,16,0,4" /><TextBox x:Name="RateBox" /></StackPanel>
+                  <StackPanel x:Name="CodexPathFallbackPanel" Visibility="Collapsed"><TextBlock Text="{DynamicResource Loc.CodexPath}" Style="{StaticResource SettingsLabelStyle}" Margin="0,16,0,4" /><TextBox x:Name="PathBox" /><Button Click="Browse" Content="{DynamicResource Loc.Browse}" Padding="10,7" Margin="0,12,0,0" HorizontalAlignment="Left" /></StackPanel>
                   <Button Click="OpenLog" Content="{DynamicResource Loc.OpenLog}" Padding="10,7" Margin="0,12,0,7" HorizontalAlignment="Left" />
                 </StackPanel>
               </ScrollViewer>
