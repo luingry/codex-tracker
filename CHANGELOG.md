@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.1] - 2026-08-17
+
+### Fixed
+
+- GitHub release publication now distinguishes a missing release from service failures, retries transient GitHub API errors with bounded backoff, and treats already-removed old releases or tags as successful cleanup. If GitHub remains temporarily unavailable only while removing older releases, the valid current release remains published and the next release run retries the cleanup.
+
 ## [0.14.0] - 2026-08-17
 
 ### Added
@@ -294,4 +300,3 @@ Todas as mudanças relevantes deste projeto são registradas neste arquivo, segu
 - Versão da aplicação exibida de forma discreta, centralizada no rodapé da visualização detalhada.
 - Fonte única de versão em `VERSION`, usada pela build e pelo instalador.
 - Regra de versionamento semântico para alterações futuras.
-

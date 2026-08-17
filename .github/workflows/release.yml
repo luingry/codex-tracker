@@ -77,48 +77,153 @@ jobs:
           path: ${{ steps.release_metadata.outputs.installer_path }}
           if-no-files-found: error
 
-      - name: Create or update GitHub release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $tag = '${{ steps.release_metadata.outputs.tag }}'
-          $installer = '${{ steps.release_metadata.outputs.installer_path }}'
-          $notes = '${{ steps.release_metadata.outputs.notes_path }}'
-          $title = 'Codex Tracker ${{ steps.release_metadata.outputs.version }}'
-
-          gh release view $tag --json id | Out-Null
-          if ($LASTEXITCODE -eq 0) {
-            gh release edit $tag --title $title --notes-file $notes
-            if ($LASTEXITCODE -ne 0) { throw "Failed to update release $tag." }
-            gh release upload $tag $installer --clobber
-            if ($LASTEXITCODE -ne 0) { throw "Failed to upload the setup asset for $tag." }
-          }
-          else {
-            gh release create $tag $installer --title $title --notes-file $notes
-            if ($LASTEXITCODE -ne 0) { throw "Failed to create release $tag." }
-          }
-
-      - name: Remove older releases and their tags
+      - name: Publish GitHub release and remove older releases
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           CURRENT_TAG: ${{ steps.release_metadata.outputs.tag }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $tag = '${{ steps.release_metadata.outputs.tag }}'
+          $installer = '${{ steps.release_metadata.outputs.installer_path }}'
+          $notes = '${{ steps.release_metadata.outputs.notes_path }}'
+          $title = 'Codex Tracker ${{ steps.release_metadata.outputs.version }}'
+
+          function Get-GhHttpStatus([string] $output) {
+            $match = [regex]::Match($output, '(?im)\b(?:HTTP\s+|status\s+code:\s*)(\d{3})\b')
+            if ($match.Success) { return [int]$match.Groups[1].Value }
+            return $null
+          }
+
+          function Test-GhKnownNotFound([Nullable[int]] $status, [string] $output) {
+            if ($status -eq 404) { return $true }
+
+            # gh release view can emit this exact message without an HTTP status.
+            return $null -eq $status -and $output -match '(?im)^\s*release not found\s*$'
+          }
+
+          function Test-GhTransientFailure([Nullable[int]] $status, [string] $output) {
+            if ($status -eq 408 -or $status -eq 429 -or ($status -ge 500 -and $status -le 599)) {
+              return $true
+            }
+
+            return $output -match '(?im)(connection.*(reset|refused|timed out)|timeout|temporarily unavailable|TLS handshake|network is unreachable)'
+          }
+
+          function Invoke-GhWithRetry {
+            param(
+              [Parameter(Mandatory = $true)][string] $Action,
+              [Parameter(Mandatory = $true)][scriptblock] $Command,
+              [switch] $AllowNotFound,
+              [switch] $ReturnTransientFailure,
+              [scriptblock] $ConfirmSucceededAfterTransientFailure
+            )
+
+            $maxAttempts = 4
+            for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+              $output = (& $Command 2>&1 | Out-String).Trim()
+              $exitCode = $LASTEXITCODE
+              if ($exitCode -eq 0) {
+                return [pscustomobject]@{ Succeeded = $true; NotFound = $false; Output = $output }
+              }
+
+              $status = Get-GhHttpStatus $output
+              if ($AllowNotFound -and (Test-GhKnownNotFound $status $output)) {
+                Write-Host "$Action was already absent."
+                return [pscustomobject]@{ Succeeded = $true; NotFound = $true; Output = $output }
+              }
+
+              $isTransient = Test-GhTransientFailure $status $output
+              if ($isTransient -and $null -ne $ConfirmSucceededAfterTransientFailure -and (& $ConfirmSucceededAfterTransientFailure)) {
+                Write-Host "$Action was confirmed successful after a transient failure."
+                return [pscustomobject]@{ Succeeded = $true; NotFound = $false; Output = $output }
+              }
+
+              if ($isTransient -and $attempt -lt $maxAttempts) {
+                $delaySeconds = [int][Math]::Pow(2, $attempt - 1)
+                Write-Warning "$Action failed transiently (attempt $attempt/$maxAttempts, HTTP $status). Retrying in $delaySeconds second(s)."
+                Start-Sleep -Seconds $delaySeconds
+                continue
+              }
+
+              if ($isTransient -and $ReturnTransientFailure) {
+                return [pscustomobject]@{ Succeeded = $false; NotFound = $false; Output = $output }
+              }
+
+              $statusDescription = if ($null -eq $status) { 'without an HTTP status' } else { "with HTTP $status" }
+              $exception = [System.InvalidOperationException]::new("$Action failed $statusDescription after $attempt attempt(s): $output")
+              $exception.Data['IsTransient'] = $isTransient
+              throw $exception
+            }
+          }
+
+          function Get-Release([string] $releaseTag) {
+            return Invoke-GhWithRetry -Action "View release $releaseTag" -AllowNotFound -Command {
+              gh release view $releaseTag --json id
+            }
+          }
+
+          function Confirm-ReleaseExistsAfterTransientFailure([string] $releaseTag) {
+            try {
+              return -not (Get-Release $releaseTag).NotFound
+            }
+            catch {
+              if ($_.Exception.Data['IsTransient'] -eq $true) {
+                Write-Warning "Could not confirm whether release $releaseTag was created because GitHub remained temporarily unavailable. Continuing the create retry."
+                return $false
+              }
+
+              throw
+            }
+          }
+
+          function Remove-OlderReleaseAndTag($release) {
+            $releaseDeletion = Invoke-GhWithRetry -Action "Delete old release $($release.tag_name)" -AllowNotFound -ReturnTransientFailure -Command {
+              gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)"
+            }
+
+            # Try the tag even when the release deletion timed out: the server may have
+            # applied the deletion before returning its transient failure response.
+            $tagDeletion = Invoke-GhWithRetry -Action "Delete old tag $($release.tag_name)" -AllowNotFound -ReturnTransientFailure -Command {
+              gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/tags/$($release.tag_name)"
+            }
+
+            if (-not $releaseDeletion.Succeeded -or -not $tagDeletion.Succeeded) {
+              Write-Warning "The current release was published, but cleanup of old release/tag $($release.tag_name) could not complete because GitHub remained temporarily unavailable. Cleanup will be retried by the next release workflow run."
+            }
+          }
+
+          $release = Get-Release $tag
+          if ($release.NotFound) {
+            $created = Invoke-GhWithRetry -Action "Create release $tag" `
+              -Command { gh release create $tag --title $title --notes-file $notes } `
+              -ConfirmSucceededAfterTransientFailure { Confirm-ReleaseExistsAfterTransientFailure $tag }
+            if (-not $created.Succeeded) { throw "Failed to create release $tag." }
+          }
+
+          $edited = Invoke-GhWithRetry -Action "Update release $tag" -Command {
+            gh release edit $tag --title $title --notes-file $notes
+          }
+          if (-not $edited.Succeeded) { throw "Failed to update release $tag." }
+
+          $uploaded = Invoke-GhWithRetry -Action "Upload setup asset for $tag" -Command {
+            gh release upload $tag $installer --clobber
+          }
+          if (-not $uploaded.Succeeded) { throw "Failed to upload the setup asset for $tag." }
+
           $endpoint = "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
-          $releasePages = gh api --paginate --slurp $endpoint | ConvertFrom-Json
+          $releaseList = Invoke-GhWithRetry -Action 'List releases for cleanup' -ReturnTransientFailure -Command {
+            gh api --paginate --slurp $endpoint
+          }
+          if (-not $releaseList.Succeeded) {
+            Write-Warning 'The current release was published, but cleanup of older releases could not complete because GitHub remained temporarily unavailable. Cleanup will be retried by the next release workflow run.'
+            return
+          }
+
+          $releasePages = $releaseList.Output | ConvertFrom-Json
           $releases = @($releasePages | ForEach-Object { $_ })
           $olderReleases = @($releases | Where-Object { $_.tag_name -ne $env:CURRENT_TAG })
 
           foreach ($release in $olderReleases) {
-            gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)"
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to delete release $($release.tag_name)."
-            }
-
-            gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/tags/$($release.tag_name)"
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to delete tag $($release.tag_name)."
-            }
+            Remove-OlderReleaseAndTag $release
           }

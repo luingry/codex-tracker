@@ -268,6 +268,13 @@
 - **Solução:** `ApplyAgents` aceita uma preferência opcional injetável para testes, enquanto produção continua consultando o Windows. Os testes cobrem explicitamente animação habilitada e reduced motion.
 - **Prevenção:** parâmetros de acessibilidade do sistema operacional devem ser entradas controláveis em testes determinísticos; não derive uma expectativa fixa do ambiente do runner.
 
+## Publicação de release falhava durante indisponibilidade transitória do GitHub
+
+- **Sintoma:** a execução de release `32042391885` recebeu HTTP 503 ao criar a release e, depois de publicar `v0.14.0`, falhou ao remover a release antiga `v0.13.3` por outro HTTP 503.
+- **Causa:** o workflow tratava toda falha de `gh release view` como se a release não existisse e executava criação, upload e remoções sem retry. O cleanup obrigatório transformava uma indisponibilidade temporária após a publicação válida em falha total do pipeline.
+- **Solução:** o workflow agora reconhece explicitamente HTTP 404 — e a mensagem exata `release not found` do `gh release view` — como release ausente, interpreta também o formato real `status code: 503`, aplica quatro tentativas com backoff exponencial às operações de publicação e API, confirma criações ambíguas sem interromper o retry se a confirmação também estiver indisponível, aceita 404 nas remoções idempotentes e sempre tenta a tag antiga mesmo após uma resposta ambígua ao apagar a release. Quando apenas o cleanup de versões antigas esgota tentativas transitórias, conclui com warning.
+- **Prevenção:** em automações de publicação, classifique falhas HTTP por status; preserve erros não transitórios e separe a validade da release atual da retenção de artefatos antigos.
+
 ## Operadores de range/index (`x[1..]`) não compilam no target net48
 
 - **Sintoma:** código novo usando `texto[1..]`, `texto[..indice]` ou `texto[^1]` compilaria em um projeto net8.0, mas falharia com `CS0518: Predefined type 'System.Index' is not defined` (ou `System.Range`) neste repositório, que ainda tem `TargetFramework=net48` em `CodexTracker`, `CodexTracker.Core` e `CodexTracker.Tests`.
