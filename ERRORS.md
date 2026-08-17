@@ -1,5 +1,19 @@
 # Erros e solucoes conhecidas
 
+## Nova execução no mesmo chat root duplicava a linha concluída
+
+- **Sintoma:** depois que um chat root concluía e ficava não lido, iniciar outra task nesse mesmo chat adicionava uma linha ativa sem remover a conclusão anterior; status e tempo apareciam em entradas separadas.
+- **Causa:** linhas ativas eram reconciliadas por `ThreadId`, enquanto conclusões eram reconciliadas e persistidas por `CompletionId`; a composição apenas concatenava as duas coleções, permitindo que turnos diferentes do mesmo chat coexistissem.
+- **Solução:** a identidade visual e persistida de conclusões passou a ser o `ThreadId`; quando esse chat volta a ficar ativo, a conclusão não lida é removida e persistida, a mesma linha é promovida para ativa e seu status e tempo são recalculados a partir da nova execução.
+- **Prevenção:** cubra a sequência conclusão não lida -> novo `task_started` no mesmo root, exigindo uma única linha, identidade visual estável, status ativo e elapsed reiniciado.
+
+## Widget permanecia visível após fechar o Codex para a bandeja
+
+- **Sintoma:** ao clicar no X da janela do Codex, o aplicativo permanecia nos ícones ocultos, mas o tracker ocioso continuava visível.
+- **Causa:** `GetForegroundWindow` ainda podia apontar para uma HWND do processo Codex depois do X, embora ela já estivesse invisível ou DWM-cloaked; o monitor verificava somente `IsIconic`, então a classificava incorretamente como Codex em primeiro plano. A primeira tentativa de distinguir foco transitório do tracker foi insuficiente porque não tratava essa HWND residual.
+- **Solução:** o monitor agora rejeita HWNDs do Codex que não estão visíveis ou estão cloaked. Se `DwmGetWindowAttribute` não estiver disponível ou falhar, mantém o comportamento compatível e considera a janela não cloaked.
+- **Prevenção:** cubra no seam do monitor uma HWND do caminho real do Codex escondida, cloaked, visível e minimizada; preserve a prioridade absoluta de trabalho ativo e conclusões não lidas na política de visibilidade.
+
 ## Widget sumia ao ler a última conclusão com o Codex em primeiro plano
 
 - **Sintoma:** ao abrir o último trabalho concluído não lido, o indicador era removido e o widget desaparecia mesmo com a janela do Codex em foco.

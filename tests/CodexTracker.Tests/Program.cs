@@ -201,10 +201,11 @@ var settingsTestPath = Path.Combine(settingsTestDirectory, "settings.json");
 try
 {
     var persistedUnread = new CompletedAgentWork("thread:turn", "thread", "Agent", "Entrega", "Concluído", "gpt-5.6-terra", "medium", DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow);
-    var persistedSettings = new AppSettings(Left: 412.5, Top: 237.25, IsExpanded: true, IsTopmost: false, CodexPath: @"C:\\Tools\\codex.exe", UsdBrl: 5.89m, Theme: "Escuro", CurrencyCode: "USD", ModeSizes: new WidgetModeSizes(new(90, 1), new(300, 480), new(300, 620)), IsAgentListExpanded: true, AccentColor: "#FFB000", LanguageCode: "en-US", UnreadAgentWorks: [persistedUnread]);
+    var newerPersistedUnread = persistedUnread with { CompletionId = "thread:new-turn", CompletedAt = persistedUnread.CompletedAt.AddMinutes(1) };
+    var persistedSettings = new AppSettings(Left: 412.5, Top: 237.25, IsExpanded: true, IsTopmost: false, CodexPath: @"C:\\Tools\\codex.exe", UsdBrl: 5.89m, Theme: "Escuro", CurrencyCode: "USD", ModeSizes: new WidgetModeSizes(new(90, 1), new(300, 480), new(300, 620)), IsAgentListExpanded: true, AccentColor: "#FFB000", LanguageCode: "en-US", UnreadAgentWorks: [persistedUnread, newerPersistedUnread]);
     new SettingsStore(settingsTestPath).Save(persistedSettings);
     var reloadedSettings = new SettingsStore(settingsTestPath).Load();
-    Assert(reloadedSettings.Left == 412.5 && reloadedSettings.Top == 237.25 && reloadedSettings.IsExpanded && !reloadedSettings.IsTopmost && reloadedSettings.CodexPath == @"C:\\Tools\\codex.exe" && reloadedSettings.UsdBrl == 5.89m && reloadedSettings.Theme == "Escuro" && reloadedSettings.CurrencyCode == "USD" && reloadedSettings.IsAgentListExpanded && reloadedSettings.AccentColor == "#FFB000" && reloadedSettings.LanguageCode == "en-US" && reloadedSettings.UnreadAgentWorks?.Single().CompletionId == "thread:turn", "settings file round trip persists unread completed work and existing preferences");
+    Assert(reloadedSettings.Left == 412.5 && reloadedSettings.Top == 237.25 && reloadedSettings.IsExpanded && !reloadedSettings.IsTopmost && reloadedSettings.CodexPath == @"C:\\Tools\\codex.exe" && reloadedSettings.UsdBrl == 5.89m && reloadedSettings.Theme == "Escuro" && reloadedSettings.CurrencyCode == "USD" && reloadedSettings.IsAgentListExpanded && reloadedSettings.AccentColor == "#FFB000" && reloadedSettings.LanguageCode == "en-US" && reloadedSettings.UnreadAgentWorks?.Single().CompletionId == "thread:new-turn", "settings round trip keeps only the latest unread execution per root chat while preserving existing preferences");
 }
 finally
 {
@@ -217,6 +218,8 @@ Assert(WidgetVisibilityPolicy.ShouldShow(true, false, false, true, false) && Wid
 Assert(WidgetVisibilityPolicy.ShouldShow(false, false, true, false, false) && WidgetVisibilityPolicy.ShouldShow(false, false, false, false, true), "Codex foreground and direct widget interaction keep the widget visible");
 Assert(!WidgetVisibilityPolicy.ShouldShow(false, false, false, false, false) && !WidgetVisibilityPolicy.ShouldShow(false, false, true, true, false), "idle widget hides immediately when Codex is backgrounded or minimized");
 Assert(CodexDesktopWindowMonitor.IsCodexDesktopExecutable(@"C:\Program Files\WindowsApps\OpenAI.Codex_26.810.4967.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe") && CodexDesktopWindowMonitor.IsCodexDesktopExecutable(@"C:\Program Files\WindowsApps\OpenAI.Codex_26.810.4967.0_x64__2p2nqsd0c76g0\app\resources\codex.exe") && !CodexDesktopWindowMonitor.IsCodexDesktopExecutable(@"C:\Users\user\.codex\plugins\.plugin-appserver\codex.exe") && !CodexDesktopWindowMonitor.IsCodexDesktopExecutable(@"C:\Tools\ChatGPT.exe"), "desktop window detection accepts the real ChatGPT host and packaged Codex process while rejecting unrelated or CLI executables");
+var codexDesktopPath = @"C:\Program Files\WindowsApps\OpenAI.Codex_26.810.4967.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe";
+Assert(!CodexDesktopWindowMonitor.Observe(codexDesktopPath, false, false, false).IsForeground && !CodexDesktopWindowMonitor.Observe(codexDesktopPath, true, true, false).IsForeground && CodexDesktopWindowMonitor.Observe(codexDesktopPath, true, false, false).IsForeground && CodexDesktopWindowMonitor.Observe(codexDesktopPath, true, false, true) is { IsForeground: true, IsMinimized: true }, "desktop window observation rejects hidden and cloaked Codex HWNDs while retaining a visible minimized Codex window for the visibility policy");
 
 var agentRowsViewModel = new MainViewModel();
 Assert(CodexThreadDeepLink.TryCreate("018f18cc-9ffc-7bb3-9a48-7a3df5372adc", out var validThreadLink) && validThreadLink!.AbsoluteUri == "codex://threads/018f18cc-9ffc-7bb3-9a48-7a3df5372adc", "thread deep links accept a canonical UUID and target exactly its Codex thread");
@@ -285,6 +288,7 @@ var refreshAgentsEnd = mainWindowCode.IndexOf("private void ToggleAgentList", re
 var refreshAgentsCode = refreshAgentsStart >= 0 && refreshAgentsEnd > refreshAgentsStart ? mainWindowCode.Substring(refreshAgentsStart, refreshAgentsEnd - refreshAgentsStart) : string.Empty;
 Assert(refreshAgentsCode.Contains("else if (_settings.IsAgentListExpanded && !_viewModel.Expanded) _viewModel.IsAgentListOpen = true;", StringComparison.Ordinal), "agent refresh never opens the list while detailed mode is active");
 Assert(mainWindowCode.Contains("_unreadAgentWorks[index] = work with { Title = title.Trim() };", StringComparison.Ordinal) && mainWindowCode.Contains("if (unreadChanged)", StringComparison.Ordinal) && mainWindowCode.Contains("PersistUnreadAgentWorks();", StringComparison.Ordinal), "late app-server titles replace and persist fallback titles for unread completed work");
+Assert(mainWindowCode.Contains("_unreadAgentWorks.RemoveAll(work => activeThreadIds.Contains(work.ThreadId))", StringComparison.Ordinal), "agent refresh permanently discards an old unread completion when the same root chat starts running again");
 var toggleDetailedStart = mainWindowCode.IndexOf("private void ToggleDetailed", StringComparison.Ordinal);
 var toggleDetailedEnd = mainWindowCode.IndexOf("private void Settings", toggleDetailedStart, StringComparison.Ordinal);
 var toggleDetailedCode = toggleDetailedStart >= 0 && toggleDetailedEnd > toggleDetailedStart ? mainWindowCode.Substring(toggleDetailedStart, toggleDetailedEnd - toggleDetailedStart) : string.Empty;
@@ -306,16 +310,19 @@ reducedMotionAgents.ApplyAgents([rootAgent, childAgent], agentRowsNow.AddSeconds
 Assert(reducedMotionAgents.ActiveAgents.All(row => !row.IsNew), "reduced-motion preference suppresses new-row entry animation deterministically");
 var unreadWork = new CompletedAgentWork("root:turn", "root", "Agent", "Principal", "Concluído", "gpt-5.6-sol", "high", agentRowsNow.AddMinutes(-2), agentRowsNow);
 agentRowsViewModel.ApplyUnreadCompletedAgents([unreadWork]);
-Assert(agentRowsViewModel.HasActiveAgents && agentRowsViewModel.HasUnreadCompletedAgents && !agentRowsViewModel.ShowsCompletedIndicator && agentRowsViewModel.AgentItems.Count == 3 && agentRowsViewModel.AgentItems.Take(2).All(row => !row.IsCompleted) && agentRowsViewModel.AgentItems.Last().IsCompleted, "active and unread completed principal work share the list with active rows first while the counter keeps indicator priority");
+Assert(agentRowsViewModel.HasActiveAgents && !agentRowsViewModel.HasUnreadCompletedAgents && agentRowsViewModel.AgentItems.Count == 2 && agentRowsViewModel.AgentItems.All(row => !row.IsCompleted), "an unread completion for a currently active root chat is discarded instead of duplicating its row");
 var activeRowBeforeCompletedRefresh = agentRowsViewModel.AgentItems[0];
 agentRowsViewModel.ApplyUnreadCompletedAgents([unreadWork, unreadWork, new CompletedAgentWork("sub:turn", "sub", "Subagent", "Filho", "Concluído", "gpt-5.6-terra", "medium", agentRowsNow.AddMinutes(-1), agentRowsNow)]);
-Assert(agentRowsViewModel.AgentItems.Count == 3 && ReferenceEquals(activeRowBeforeCompletedRefresh, agentRowsViewModel.AgentItems[0]) && agentRowsViewModel.AgentItems.Count(row => row.IsCompleted) == 1, "refreshing unread completions retains active visual identities and excludes duplicate or subagent completions");
-var completedRowBeforeMetadataRefresh = agentRowsViewModel.AgentItems.Single(row => row.IsCompleted);
-agentRowsViewModel.ApplyUnreadCompletedAgents([unreadWork with { Title = "Título resolvido", Status = "Finalizado" }]);
-var completedRowAfterMetadataRefresh = agentRowsViewModel.AgentItems.Single(row => row.IsCompleted);
-Assert(ReferenceEquals(completedRowBeforeMetadataRefresh, completedRowAfterMetadataRefresh) && completedRowAfterMetadataRefresh.Title == "Título resolvido" && completedRowAfterMetadataRefresh.Status == "Finalizado", "late completion metadata updates the existing completed row without restarting its visual identity");
+Assert(agentRowsViewModel.AgentItems.Count == 2 && ReferenceEquals(activeRowBeforeCompletedRefresh, agentRowsViewModel.AgentItems[0]) && agentRowsViewModel.AgentItems.All(row => !row.IsCompleted), "refreshing stale unread completions retains active visual identities and excludes active-root, duplicate, and subagent completions");
 agentRowsViewModel.ApplyAgents([], agentRowsNow, false);
-Assert(agentRowsViewModel.ShowsCompletedIndicator && agentRowsViewModel.AgentItems.Single().IsCompleted, "completed unread work becomes the visible agent list immediately after active work ends");
+agentRowsViewModel.ApplyUnreadCompletedAgents([unreadWork, unreadWork with { CompletionId = "root:older-turn", CompletedAt = agentRowsNow.AddMinutes(-1) }]);
+var completedRowBeforeRestart = agentRowsViewModel.AgentItems.Single();
+Assert(agentRowsViewModel.ShowsCompletedIndicator && completedRowBeforeRestart.IsCompleted && completedRowBeforeRestart.CompletionId == "root:turn", "completed unread work keeps only the latest execution per root chat");
+var restartedRoot = rootAgent with { Status = "Trabalhando", StartedAt = agentRowsNow.AddSeconds(5), LastActivityAt = agentRowsNow.AddSeconds(10) };
+agentRowsViewModel.ApplyAgents([restartedRoot], agentRowsNow.AddSeconds(10), true, animationsEnabled: true);
+agentRowsViewModel.ApplyUnreadCompletedAgents([unreadWork]);
+var restartedRow = agentRowsViewModel.AgentItems.Single();
+Assert(ReferenceEquals(completedRowBeforeRestart, restartedRow) && !restartedRow.IsCompleted && restartedRow.Status == LocalizationManager.TranslateKnown("Trabalhando") && restartedRow.Elapsed == "0m 05s" && !agentRowsViewModel.HasUnreadCompletedAgents, "restarting the same root chat reuses its row, updates status, and resets elapsed time without duplication");
 
 var resizeWorkArea = new ResizeWorkArea(-1920, 0, 1920, 1080);
 var compactStart = new ResizeBounds(-1500, 200, 124, 104);

@@ -33,6 +33,7 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
 
     public void Update(CompletedAgentWork work)
     {
+        CompletionId = work.CompletionId;
         _sourceType = work.Type;
         _sourceTitle = work.Title;
         _sourceStatus = work.Status;
@@ -43,7 +44,7 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
     }
 
     public string ThreadId { get; }
-    public string? CompletionId { get; }
+    public string? CompletionId { get; private set; }
     public string? ParentThreadId => _parentThreadId;
     public int HierarchyDepth => _hierarchyDepth;
     public Thickness Indent => _indent;
@@ -58,6 +59,7 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
 
     public void Update(ActiveAgent agent, DateTimeOffset now)
     {
+        CompletionId = null;
         Set(ref _parentThreadId, agent.ParentThreadId, nameof(ParentThreadId));
         Set(ref _hierarchyDepth, agent.HierarchyDepth, nameof(HierarchyDepth));
         Set(ref _indent, new Thickness(Math.Min(48d, agent.HierarchyDepth * 12d), 0, 0, 0), nameof(Indent));
@@ -68,6 +70,7 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
         Set(ref _modelAndEffort, $"{agent.Model} · {agent.Effort}", nameof(ModelAndEffort));
         Set(ref _elapsed, FormatElapsed(now - agent.StartedAt), nameof(Elapsed));
         Set(ref _isWorkAnimationEnabled, SystemParameters.ClientAreaAnimation, nameof(IsWorkAnimationEnabled));
+        Set(ref _isCompleted, false, nameof(IsCompleted));
     }
 
     public void MarkStable() => Set(ref _isNew, false, nameof(IsNew));
@@ -157,10 +160,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         var hasActiveAgents = agents.Count > 0;
         var existing = ActiveAgents.ToDictionary(row => row.ThreadId, StringComparer.OrdinalIgnoreCase);
+        var completedByThread = _completedAgentRows
+            .GroupBy(row => row.ThreadId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var activeThreadIds = agents.Select(agent => agent.ThreadId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _completedAgentRows = _completedAgentRows.Where(row => !activeThreadIds.Contains(row.ThreadId)).ToArray();
         var ordered = new List<AgentActivityRow>(agents.Count);
         foreach (var agent in agents)
         {
             if (existing.TryGetValue(agent.ThreadId, out var row)) row.Update(agent, now);
+            else if (completedByThread.TryGetValue(agent.ThreadId, out row)) row.Update(agent, now);
             else row = new AgentActivityRow(agent, now, animateNewRows && (animationsEnabled ?? SystemParameters.ClientAreaAnimation));
             ordered.Add(row);
         }
@@ -174,6 +183,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         while (ActiveAgents.Count > ordered.Count) ActiveAgents.RemoveAt(ActiveAgents.Count - 1);
         ActiveAgentCount = agents.Count;
         HasActiveAgents = hasActiveAgents;
+        UpdateUnreadCompletedState();
         PropertyChanged?.Invoke(this, new(nameof(IsWorkAnimationEnabled)));
         PropertyChanged?.Invoke(this, new(nameof(HasAgentIndicator)));
         PropertyChanged?.Invoke(this, new(nameof(ShowsCompletedIndicator)));
@@ -183,27 +193,33 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public void ApplyUnreadCompletedAgents(IReadOnlyList<CompletedAgentWork> works)
     {
+        var activeThreadIds = ActiveAgents.Select(row => row.ThreadId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var existing = _completedAgentRows
-            .Where(row => row.CompletionId is not null)
-            .ToDictionary(row => row.CompletionId!, StringComparer.OrdinalIgnoreCase);
+            .GroupBy(row => row.ThreadId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
         _completedAgentRows = works
-            .Where(work => !string.Equals(work.Type, "Subagent", StringComparison.OrdinalIgnoreCase))
-            .GroupBy(work => work.CompletionId, StringComparer.OrdinalIgnoreCase)
+            .Where(work => !string.Equals(work.Type, "Subagent", StringComparison.OrdinalIgnoreCase) && !activeThreadIds.Contains(work.ThreadId))
+            .GroupBy(work => work.ThreadId, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderByDescending(work => work.CompletedAt).First())
             .OrderByDescending(work => work.CompletedAt)
             .Select(work =>
             {
-                if (!existing.TryGetValue(work.CompletionId, out var row)) return new AgentActivityRow(work);
+                if (!existing.TryGetValue(work.ThreadId, out var row)) return new AgentActivityRow(work);
                 row.Update(work);
                 return row;
             })
             .ToArray();
+        UpdateUnreadCompletedState();
+        RefreshAgentItems();
+    }
+
+    private void UpdateUnreadCompletedState()
+    {
         UnreadCompletedAgentCount = _completedAgentRows.Count;
         HasUnreadCompletedAgents = _completedAgentRows.Count > 0;
         PropertyChanged?.Invoke(this, new(nameof(HasAgentIndicator)));
         PropertyChanged?.Invoke(this, new(nameof(ShowsCompletedIndicator)));
         PropertyChanged?.Invoke(this, new(nameof(AgentIndicatorTooltip)));
-        RefreshAgentItems();
     }
 
     private void RefreshAgentItems()

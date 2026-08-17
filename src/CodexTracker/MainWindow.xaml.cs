@@ -258,6 +258,8 @@ public partial class MainWindow : Window
                     unreadChanged = true;
                 }
             }
+            var activeThreadIds = agents.Select(agent => agent.ThreadId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (_unreadAgentWorks.RemoveAll(work => activeThreadIds.Contains(work.ThreadId)) > 0) unreadChanged = true;
             if (unreadChanged) PersistUnreadAgentWorks();
             var previouslyVisibleIndicator = _viewModel.HasAgentIndicator;
             var previouslyActive = _viewModel.HasActiveAgents;

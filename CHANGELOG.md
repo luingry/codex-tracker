@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.3] - 2026-08-17
+
+### Fixed
+
+- Restarting work in a previously completed root chat now reuses its existing tracker row, clears the stale unread completion, and updates the active status and elapsed time from the new execution instead of showing a duplicate entry.
+
+## [0.13.2] - 2026-08-16
+
+### Fixed
+
+- The idle tracker now hides after the Codex window is closed to the notification area: hidden or DWM-cloaked Codex HWNDs no longer count as foreground. Active work, unread completions, a visible foreground Codex window, direct tracker interaction, and the open agent popup retain their existing visibility behavior.
+
 ## [0.13.0] - 2026-08-14
 
 ### Added

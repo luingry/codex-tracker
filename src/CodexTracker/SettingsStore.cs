@@ -28,7 +28,7 @@ public sealed class SettingsStore
             LanguageCode = LocalizationManager.NormalizeLanguage(settings.LanguageCode),
             UnreadAgentWorks = (settings.UnreadAgentWorks ?? [])
                 .Where(item => !string.IsNullOrWhiteSpace(item.CompletionId) && !string.IsNullOrWhiteSpace(item.ThreadId))
-                .GroupBy(item => item.CompletionId, StringComparer.OrdinalIgnoreCase)
+                .GroupBy(item => item.ThreadId, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.OrderByDescending(item => item.CompletedAt).First())
                 .OrderByDescending(item => item.CompletedAt)
                 .Take(50)
