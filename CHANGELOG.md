@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.0] - 2026-08-17
+
+### Added
+
+- Settings now include a "Check for updates" action that queries the public GitHub release, and automatic checks run at most once per day. When a newer version is found, the update dialog only appears while the detailed view is open (or immediately if a manual check finds one), never interrupting the compact widget. Its "Update" button downloads the installer transparently with in-dialog progress, runs it silently, and relaunches the newly installed version; "Later" dismisses it until the next day's check.
+
 ## [0.13.3] - 2026-08-17
 
 ### Fixed

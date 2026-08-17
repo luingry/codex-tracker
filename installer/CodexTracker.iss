@@ -52,6 +52,15 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Launch Codex Tracker"; Flags: nowait postinstall skipifsilent
+; The in-app updater passes /update=1 on its silent install command line so the new version
+; relaunches even though skipifsilent above suppresses the interactive-only entry.
+Filename: "{app}\{#AppExeName}"; Flags: nowait; Check: ShouldRelaunchAfterUpdate
 
 [UninstallRun]
 Filename: "{app}\{#AppExeName}"; Parameters: "--shutdown-existing"; Flags: runhidden waituntilterminated; RunOnceId: "ShutdownCodexTracker"
+
+[Code]
+function ShouldRelaunchAfterUpdate(): Boolean;
+begin
+  Result := ExpandConstant('{param:update|0}') = '1';
+end;

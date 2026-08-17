@@ -268,6 +268,13 @@
 - **Solução:** `ApplyAgents` aceita uma preferência opcional injetável para testes, enquanto produção continua consultando o Windows. Os testes cobrem explicitamente animação habilitada e reduced motion.
 - **Prevenção:** parâmetros de acessibilidade do sistema operacional devem ser entradas controláveis em testes determinísticos; não derive uma expectativa fixa do ambiente do runner.
 
+## Operadores de range/index (`x[1..]`) não compilam no target net48
+
+- **Sintoma:** código novo usando `texto[1..]`, `texto[..indice]` ou `texto[^1]` compilaria em um projeto net8.0, mas falharia com `CS0518: Predefined type 'System.Index' is not defined` (ou `System.Range`) neste repositório, que ainda tem `TargetFramework=net48` em `CodexTracker`, `CodexTracker.Core` e `CodexTracker.Tests`.
+- **Causa:** `System.Index`/`System.Range` não existem no mscorlib do .NET Framework 4.8; `Microsoft.NETFramework.ReferenceAssemblies` fornece apenas as assemblies de referência do framework real, sem um shim para esses tipos. `LangVersion=latest` permite a sintaxe no compilador, mas o binding dos tipos falha em tempo de compilação.
+- **Solução:** evitar `[..]`/`[^]` em qualquer projeto do repositório (todos net48); usar `string.Substring(start)`/`string.Substring(start, length)` equivalentes. Coleções (`[]`, `[..spread]`) continuam permitidas normalmente, pois expression collections não dependem de `System.Index`/`System.Range`.
+- **Prevenção:** ao escrever código novo, prefira revisar arquivos já existentes no mesmo projeto para confirmar quais recursos de C# 8+ realmente compilam sob net48 antes de assumir que qualquer sintaxe válida para `LangVersion=latest` também é válida no runtime alvo.
+
 ## Chevron de hover do indicador de agentes não aparecia após o ajuste de estado aberto
 
 - **Sintoma:** o indicador mostrava apenas o número em hover, especialmente com a lista aberta.

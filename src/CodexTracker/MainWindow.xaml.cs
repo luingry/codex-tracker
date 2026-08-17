@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private readonly LocalUsageAnalyticsService _analytics = new();
     private readonly StartupAnalyticsCoordinator _startupAnalytics = new();
     private readonly AgentActivityService _agentActivity = new();
+    private readonly UpdateController _updates = new();
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(60) };
     private readonly DispatcherTimer _agentTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _visibilityTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
@@ -41,8 +42,12 @@ public partial class MainWindow : Window
     private int _agentRefreshRunning;
     private int _titleRefreshRunning;
     private int _refreshTick;
+    private int _updateCheckRunning;
+    private int _updateInstallRunning;
     private bool _agentStateInitialized;
     private UsageAnalytics? _lastLoadedAnalytics;
+    private UpdateAvailability? _pendingUpdate;
+    private CancellationTokenSource? _updateInstallCancellation;
     private bool _dragCandidate;
     private bool _nativeDragInProgress;
     private bool _manualResize;
@@ -112,6 +117,7 @@ public partial class MainWindow : Window
             await RefreshAgentsAsync();
             UpdateWidgetVisibility();
             _ = RefreshAnalyticsAsync();
+            _ = CheckForUpdatesIfDueAsync();
         };
         Closing += OnClosing;
         SourceInitialized += OnSourceInitialized;
@@ -199,6 +205,7 @@ public partial class MainWindow : Window
 
     private async Task RefreshAsync()
     {
+        _ = CheckForUpdatesIfDueAsync();
         if (_client is null) { await LoadAsync(); return; }
         try
         {
@@ -313,6 +320,136 @@ public partial class MainWindow : Window
         }
         catch (Exception exception) { SanitizedLogger.Write("Agent title refresh error: " + exception.GetType().Name); }
         finally { Volatile.Write(ref _titleRefreshRunning, 0); }
+    }
+
+    private static string CurrentVersion => System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+
+    private async Task CheckForUpdatesIfDueAsync()
+    {
+        if (_demo || !UpdateCheckPolicy.IsDue(_settings.LastUpdateCheckUtc, DateTimeOffset.UtcNow)) return;
+        await RunUpdateCheckAsync(manual: false);
+    }
+
+    private async void CheckForUpdatesManual(object sender, RoutedEventArgs e) => await RunUpdateCheckAsync(manual: true);
+
+    private async Task RunUpdateCheckAsync(bool manual)
+    {
+        if (Interlocked.Exchange(ref _updateCheckRunning, 1) == 1)
+        {
+            if (manual) _viewModel.UpdateCheckFeedback = LocalizationManager.Text("UpdateCheckInProgress");
+            return;
+        }
+        try
+        {
+            if (manual) _viewModel.UpdateCheckFeedback = LocalizationManager.Text("UpdateCheckChecking");
+            else
+            {
+                // Persist the automatic attempt before touching the network. A disconnected app or
+                // unavailable GitHub endpoint must not turn the 60-second refresh timer into retries.
+                _settings = _settings with { LastUpdateCheckUtc = DateTimeOffset.UtcNow };
+                _store.Save(_settings);
+                _pendingUpdate = null;
+            }
+            UpdateAvailability availability;
+            try
+            {
+                availability = await _updates.CheckAsync(CurrentVersion, _shutdown.Token);
+            }
+            catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { return; }
+            catch (Exception exception)
+            {
+                SanitizedLogger.Write("Update check error: " + exception.GetType().Name);
+                if (manual) _viewModel.UpdateCheckFeedback = LocalizationManager.Text("UpdateCheckFailed");
+                return;
+            }
+            if (manual)
+            {
+                _settings = _settings with { LastUpdateCheckUtc = DateTimeOffset.UtcNow };
+                _store.Save(_settings);
+            }
+            if (!availability.IsAvailable || availability.LatestVersion is null)
+            {
+                if (manual) _viewModel.UpdateCheckFeedback = LocalizationManager.Text("UpdateCheckUpToDate");
+                return;
+            }
+            _pendingUpdate = availability;
+            if (manual)
+            {
+                _viewModel.UpdateCheckFeedback = "";
+                ShowUpdateDialog(availability);
+            }
+            else if (_viewModel.Expanded) MaybeShowPendingUpdateDialog();
+        }
+        finally { Volatile.Write(ref _updateCheckRunning, 0); }
+    }
+
+    private void MaybeShowPendingUpdateDialog()
+    {
+        if (_pendingUpdate is not { IsAvailable: true, LatestVersion: { } version } availability) return;
+        if (_viewModel.IsUpdateDialogOpen) return;
+        if (UpdateDeferralPolicy.ShouldSuppressAutomaticPrompt(_settings.DeferredUpdateVersion, _settings.UpdateDeferredAtUtc, version, _settings.LastUpdateCheckUtc)) return;
+        ShowUpdateDialog(availability);
+    }
+
+    private void ShowUpdateDialog(UpdateAvailability availability)
+    {
+        if (_viewModel.IsUpdateDialogOpen) return;
+        UpdateLaterButton.IsEnabled = true;
+        UpdateNowButton.IsEnabled = true;
+        _viewModel.UpdateAvailableVersion = availability.LatestVersion ?? "";
+        _viewModel.UpdateStatusMessage = "";
+        _viewModel.UpdateProgress = 0;
+        _viewModel.IsUpdateDownloading = false;
+        _viewModel.IsUpdateDialogOpen = true;
+    }
+
+    private async void StartUpdate(object sender, RoutedEventArgs e)
+    {
+        if (_pendingUpdate is not { IsAvailable: true, DownloadUrl: { } url } || Interlocked.Exchange(ref _updateInstallRunning, 1) == 1) return;
+        UpdateLaterButton.IsEnabled = false;
+        UpdateNowButton.IsEnabled = false;
+        _viewModel.IsUpdateDownloading = true;
+        _viewModel.UpdateProgress = 0;
+        _viewModel.UpdateStatusMessage = LocalizationManager.Text("UpdateDownloading");
+        _updateInstallCancellation = new CancellationTokenSource();
+        try
+        {
+            var progress = new Progress<double>(value =>
+            {
+                _viewModel.UpdateProgress = value;
+                _viewModel.UpdateStatusMessage = LocalizationManager.Format("UpdateDownloadingPercent", (int)Math.Round(value * 100));
+            });
+            var installerPath = await _updates.DownloadAsync(url, progress, _updateInstallCancellation.Token);
+            _viewModel.UpdateStatusMessage = LocalizationManager.Text("UpdateInstalling");
+            _updates.StartSilentInstall(installerPath);
+            Close();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            SanitizedLogger.Write("Update install error: " + exception.GetType().Name);
+            _viewModel.UpdateStatusMessage = LocalizationManager.Text("UpdateFailed");
+            _viewModel.IsUpdateDownloading = false;
+            UpdateLaterButton.IsEnabled = true;
+            UpdateNowButton.IsEnabled = true;
+        }
+        finally
+        {
+            _updateInstallCancellation?.Dispose();
+            _updateInstallCancellation = null;
+            Volatile.Write(ref _updateInstallRunning, 0);
+        }
+    }
+
+    private void DeferUpdate(object sender, RoutedEventArgs e)
+    {
+        if (Volatile.Read(ref _updateInstallRunning) == 1) return;
+        if (_pendingUpdate is { LatestVersion: { } version })
+        {
+            _settings = _settings with { DeferredUpdateVersion = version, UpdateDeferredAtUtc = DateTimeOffset.UtcNow };
+            _store.Save(_settings);
+        }
+        _viewModel.IsUpdateDialogOpen = false;
     }
 
     private void CreateTray()
@@ -503,6 +640,7 @@ public partial class MainWindow : Window
         {
             if (_client?.Snapshot is { } snapshot) ApplyCachedAnalyticsIfDetailed(snapshot);
             _ = RefreshAnalyticsAsync();
+            MaybeShowPendingUpdateDialog();
         }
     }
     private void Settings(object sender, RoutedEventArgs e)
@@ -523,6 +661,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        _viewModel.UpdateCheckFeedback = "";
         DetailedBox.IsChecked = _viewModel.Expanded;
         TopmostBox.IsChecked = Topmost;
         ThemeToggle.IsChecked = _settings.Theme == "Escuro";
@@ -999,7 +1138,9 @@ public partial class MainWindow : Window
         _agentTimer.Stop();
         _visibilityTimer.Stop();
         _shutdown.Cancel();
+        _updateInstallCancellation?.Cancel();
         _client?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _updates.Dispose();
         _tray?.Dispose();
         _trayMenu?.Dispose();
         _trayIcon?.Dispose();

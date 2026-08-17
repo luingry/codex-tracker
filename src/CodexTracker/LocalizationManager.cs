@@ -92,7 +92,20 @@ public static class LocalizationManager
         ["ConnectedWeeklyUnavailable"] = "Conectado - quota semanal indisponível",
         ["DayNumber"] = "Dia {0}",
         ["CodexConversation"] = "Conversa Codex",
-        ["ConnectedWeeklyRemaining"] = "Conectado - quota semanal restante {0}"
+        ["ConnectedWeeklyRemaining"] = "Conectado - quota semanal restante {0}",
+        ["CheckForUpdates"] = "Verificar atualizações",
+        ["UpdateCheckChecking"] = "Verificando atualizações…",
+        ["UpdateCheckUpToDate"] = "Você já está na versão mais recente.",
+        ["UpdateCheckFailed"] = "Não foi possível verificar atualizações.",
+        ["UpdateCheckInProgress"] = "Verificação já em andamento…",
+        ["UpdateAvailableTitle"] = "Atualização disponível",
+        ["UpdateAvailableMessage"] = "Uma nova versão do Codex Tracker está disponível: {0}",
+        ["UpdateNow"] = "Atualizar",
+        ["UpdateLater"] = "Adiar",
+        ["UpdateDownloading"] = "Baixando atualização…",
+        ["UpdateDownloadingPercent"] = "Baixando atualização… {0}%",
+        ["UpdateInstalling"] = "Instalando e reiniciando…",
+        ["UpdateFailed"] = "Falha ao atualizar. Tente novamente mais tarde."
     };
 
     private static readonly IReadOnlyDictionary<string, string> English = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -177,7 +190,20 @@ public static class LocalizationManager
         ["ConnectedWeeklyUnavailable"] = "Connected - weekly quota unavailable",
         ["DayNumber"] = "Day {0}",
         ["CodexConversation"] = "Codex conversation",
-        ["ConnectedWeeklyRemaining"] = "Connected - weekly quota remaining {0}"
+        ["ConnectedWeeklyRemaining"] = "Connected - weekly quota remaining {0}",
+        ["CheckForUpdates"] = "Check for updates",
+        ["UpdateCheckChecking"] = "Checking for updates…",
+        ["UpdateCheckUpToDate"] = "You're already on the latest version.",
+        ["UpdateCheckFailed"] = "Couldn't check for updates.",
+        ["UpdateCheckInProgress"] = "A check is already running…",
+        ["UpdateAvailableTitle"] = "Update available",
+        ["UpdateAvailableMessage"] = "A new version of Codex Tracker is available: {0}",
+        ["UpdateNow"] = "Update",
+        ["UpdateLater"] = "Later",
+        ["UpdateDownloading"] = "Downloading update…",
+        ["UpdateDownloadingPercent"] = "Downloading update… {0}%",
+        ["UpdateInstalling"] = "Installing and restarting…",
+        ["UpdateFailed"] = "Update failed. Please try again later."
     };
 
     private static readonly IReadOnlyDictionary<string, string> KnownTextKeys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)

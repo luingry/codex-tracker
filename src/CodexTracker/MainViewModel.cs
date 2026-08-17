@@ -94,6 +94,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _weekly = "--", _weeklyTokens = "--", _weeklyCost = "--", _reset = LocalizationManager.Text("LoadingWeeklyQuota"), _today = "--", _month = "--", _cost = "--", _todayCost = "--", _monthCost = "--", _coverage = "", _forecast = LocalizationManager.Text("InsufficientData"), _status = LocalizationManager.Text("Loading"), _currencyCode = "BRL";
     private bool _expanded, _topmost, _isExhaustionRisk;
     private bool _hasActiveAgents, _hasUnreadCompletedAgents, _isAgentListOpen;
+    private bool _isUpdateDialogOpen, _isUpdateDownloading;
+    private double _updateProgress;
+    private string _updateAvailableVersion = "", _updateStatusMessage = "", _updateCheckFeedback = "";
     private int _activeAgentCount, _unreadCompletedAgentCount;
     private double _remainingPercent;
     private long? _weeklyTokenCount;
@@ -152,6 +155,23 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public int ActiveAgentCount { get => _activeAgentCount; private set => Set(ref _activeAgentCount, value); }
     public int UnreadCompletedAgentCount { get => _unreadCompletedAgentCount; private set => Set(ref _unreadCompletedAgentCount, value); }
     public double RemainingPercent { get => _remainingPercent; set => Set(ref _remainingPercent, value); }
+    public bool IsUpdateDialogOpen { get => _isUpdateDialogOpen; set => Set(ref _isUpdateDialogOpen, value); }
+    public bool IsUpdateDownloading { get => _isUpdateDownloading; set => Set(ref _isUpdateDownloading, value); }
+    public double UpdateProgress { get => _updateProgress; set => Set(ref _updateProgress, value); }
+    public string UpdateStatusMessage { get => _updateStatusMessage; set => Set(ref _updateStatusMessage, value); }
+    public string UpdateCheckFeedback { get => _updateCheckFeedback; set => Set(ref _updateCheckFeedback, value); }
+    public string UpdateAvailableVersion
+    {
+        get => _updateAvailableVersion;
+        set
+        {
+            if (EqualityComparer<string>.Default.Equals(_updateAvailableVersion, value)) return;
+            _updateAvailableVersion = value;
+            PropertyChanged?.Invoke(this, new(nameof(UpdateAvailableVersion)));
+            PropertyChanged?.Invoke(this, new(nameof(UpdateAvailableMessage)));
+        }
+    }
+    public string UpdateAvailableMessage => LocalizationManager.Format("UpdateAvailableMessage", UpdateAvailableVersion);
     public bool IsRankingDay { get => _rankingPeriod == RankingPeriod.Day; set { if (value) SetRankingPeriod(RankingPeriod.Day); } }
     public bool IsRankingWeek { get => _rankingPeriod == RankingPeriod.Week; set { if (value) SetRankingPeriod(RankingPeriod.Week); } }
     public bool IsRankingMonth { get => _rankingPeriod == RankingPeriod.Month; set { if (value) SetRankingPeriod(RankingPeriod.Month); } }
@@ -359,6 +379,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (_lastForecast is { } forecast) ApplyForecast(forecast);
         else Forecast = LocalizationManager.Text("InsufficientData");
         Status = LocalizationManager.TranslateKnown(Status);
+        PropertyChanged?.Invoke(this, new(nameof(UpdateAvailableMessage)));
         foreach (var row in ActiveAgents) row.RefreshLocalization();
         foreach (var row in AgentItems.Where(row => row.IsCompleted)) row.RefreshLocalization();
         PropertyChanged?.Invoke(this, new(nameof(AgentIndicatorTooltip)));

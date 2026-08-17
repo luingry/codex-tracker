@@ -4,7 +4,7 @@ using CodexTracker.Core;
 
 namespace CodexTracker;
 
-public sealed record AppSettings(double Left = 80, double Top = 80, double Width = 62, double Height = 52, bool IsExpanded = false, bool IsTopmost = true, string? CodexPath = null, decimal UsdBrl = 5.50m, string Theme = "Claro", string CurrencyCode = "BRL", WidgetModeSizes? ModeSizes = null, bool IsAgentListExpanded = false, string AccentColor = AccentPalette.DefaultBaseHex, string LanguageCode = LocalizationManager.DefaultLanguageCode, IReadOnlyList<CompletedAgentWork>? UnreadAgentWorks = null);
+public sealed record AppSettings(double Left = 80, double Top = 80, double Width = 62, double Height = 52, bool IsExpanded = false, bool IsTopmost = true, string? CodexPath = null, decimal UsdBrl = 5.50m, string Theme = "Claro", string CurrencyCode = "BRL", WidgetModeSizes? ModeSizes = null, bool IsAgentListExpanded = false, string AccentColor = AccentPalette.DefaultBaseHex, string LanguageCode = LocalizationManager.DefaultLanguageCode, IReadOnlyList<CompletedAgentWork>? UnreadAgentWorks = null, DateTimeOffset? LastUpdateCheckUtc = null, string? DeferredUpdateVersion = null, DateTimeOffset? UpdateDeferredAtUtc = null);
 public sealed class SettingsStore
 {
     private readonly string _path;
@@ -26,6 +26,7 @@ public sealed class SettingsStore
             CurrencyCode = CurrencyPresentation.Normalize(settings.CurrencyCode),
             AccentColor = AccentPalette.Normalize(settings.AccentColor),
             LanguageCode = LocalizationManager.NormalizeLanguage(settings.LanguageCode),
+            DeferredUpdateVersion = NormalizeDeferredUpdateVersion(settings.DeferredUpdateVersion),
             UnreadAgentWorks = (settings.UnreadAgentWorks ?? [])
                 .Where(item => !string.IsNullOrWhiteSpace(item.CompletionId) && !string.IsNullOrWhiteSpace(item.ThreadId))
                 .GroupBy(item => item.ThreadId, StringComparer.OrdinalIgnoreCase)
@@ -37,5 +38,14 @@ public sealed class SettingsStore
             Height = active.Height,
             ModeSizes = slots
         };
+    }
+
+    // .NET Framework's unannotated reference assemblies mean string.IsNullOrWhiteSpace does not
+    // flow-narrow its argument here; check nullity directly so the compiler can prove it.
+    private static string? NormalizeDeferredUpdateVersion(string? value)
+    {
+        if (value is null) return null;
+        var trimmed = value.Trim();
+        return trimmed.Length == 0 ? null : trimmed;
     }
 }

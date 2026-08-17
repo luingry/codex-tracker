@@ -885,6 +885,88 @@ File.WriteAllText(staleActivityPath, """
 File.SetLastWriteTimeUtc(staleActivityPath, activityNow.AddMinutes(-10).UtcDateTime);
 Assert(activityService.Read(null, activityRoot).All(x => x.ThreadId != "stale"), "abandoned task_started files age out instead of remaining falsely active");
 Directory.Delete(activityRoot, true);
+
+Assert(SemanticVersion.TryParse("1.2.3", out var semverBase) && semverBase == new SemanticVersion(1, 2, 3, null), "semantic version parses a bare major.minor.patch");
+Assert(SemanticVersion.TryParse("v1.2.3", out var semverVPrefixed) && semverVPrefixed == semverBase, "semantic version strips a leading v prefix");
+Assert(!SemanticVersion.TryParse("1.2", out _) && !SemanticVersion.TryParse("1.2.x", out _) && !SemanticVersion.TryParse("", out _) && !SemanticVersion.TryParse(null, out _), "semantic version rejects malformed or missing input");
+Assert(SemanticVersion.TryParse("1.2.4", out var semverNewerPatch) && semverNewerPatch.IsNewerThan(semverBase), "a higher patch is newer");
+Assert(SemanticVersion.TryParse("1.3.0", out var semverNewerMinor) && semverNewerMinor.IsNewerThan(semverBase) && !semverBase.IsNewerThan(semverNewerMinor), "a higher minor outranks a higher patch of the previous minor");
+Assert(SemanticVersion.TryParse("1.2.3-beta.1", out var semverPrerelease) && semverBase.IsNewerThan(semverPrerelease) && !semverPrerelease.IsNewerThan(semverBase), "a release outranks its own prerelease");
+Assert(SemanticVersion.TryParse("1.2.3-alpha", out var semverAlpha) && SemanticVersion.TryParse("1.2.3-beta", out var semverBeta) && semverBeta.IsNewerThan(semverAlpha), "prerelease identifiers compare lexically");
+Assert(SemanticVersion.TryParse("1.2.3-2", out var semverPrereleaseTwo) && SemanticVersion.TryParse("1.2.3-10", out var semverPrereleaseTen) && semverPrereleaseTen.IsNewerThan(semverPrereleaseTwo), "numeric prerelease identifiers compare numerically rather than lexically");
+
+const string releaseJson = """
+{"tag_name":"v0.14.0","draft":false,"prerelease":false,"assets":[{"name":"CodexTracker-Setup-0.14.0.exe","browser_download_url":"https://example.com/CodexTracker-Setup-0.14.0.exe"},{"name":"CodexTracker-Setup-0.13.3.exe","browser_download_url":"https://example.com/CodexTracker-Setup-0.13.3.exe"}]}
+""";
+var parsedRelease = GithubReleaseParser.Parse(releaseJson)!;
+Assert(parsedRelease is { TagName: "v0.14.0", Prerelease: false, Draft: false } && parsedRelease.Assets.Count == 2, "github release parsing captures the tag, flags and asset list");
+Assert(UpdateEvaluator.SelectInstallerAsset(parsedRelease.Assets, new SemanticVersion(0, 14, 0, null))?.DownloadUrl == "https://example.com/CodexTracker-Setup-0.14.0.exe", "installer asset selection matches the versioned setup artifact for the published release");
+var newerAvailability = UpdateEvaluator.Evaluate("0.13.3", parsedRelease);
+Assert(newerAvailability is { IsAvailable: true, LatestVersion: "0.14.0", DownloadUrl: "https://example.com/CodexTracker-Setup-0.14.0.exe" }, "a higher published release is offered as an available update with its matching versioned installer URL");
+Assert(!UpdateEvaluator.Evaluate("0.14.0", parsedRelease).IsAvailable && !UpdateEvaluator.Evaluate("0.15.0", parsedRelease).IsAvailable, "the same or a newer local version reports no available update");
+Assert(!UpdateEvaluator.Evaluate("not-a-semver", parsedRelease).IsAvailable, "an invalid local version fails closed instead of treating it as 0.0.0");
+const string prereleaseJson = """{"tag_name":"v0.15.0-beta.1","draft":false,"prerelease":true,"assets":[{"name":"CodexTracker-latest.exe","browser_download_url":"https://example.com/beta.exe"}]}""";
+Assert(!UpdateEvaluator.Evaluate("0.13.3", GithubReleaseParser.Parse(prereleaseJson)).IsAvailable, "a prerelease release is never offered as an update");
+const string wrongVersionAssetJson = """{"tag_name":"v0.14.0","draft":false,"prerelease":false,"assets":[{"name":"CodexTracker-Setup-0.13.3.exe","browser_download_url":"https://example.com/setup.exe"}]}""";
+Assert(!UpdateEvaluator.Evaluate("0.13.3", GithubReleaseParser.Parse(wrongVersionAssetJson)).IsAvailable, "a setup artifact whose version differs from the release tag is never offered as an update");
+const string legacyAssetJson = """{"tag_name":"v0.14.0","draft":false,"prerelease":false,"assets":[{"name":"CodexTracker-latest.exe","browser_download_url":"https://example.com/legacy.exe"}]}""";
+Assert(UpdateEvaluator.Evaluate("0.13.3", GithubReleaseParser.Parse(legacyAssetJson)) is { IsAvailable: true, DownloadUrl: "https://example.com/legacy.exe" }, "the exact legacy installer name remains a safe compatibility fallback");
+Assert(UpdateEvaluator.Evaluate("0.13.3", null) is { IsAvailable: false, LatestVersion: null }, "a failed release lookup reports no available update");
+
+var updateCheckNow = new DateTimeOffset(2026, 8, 17, 12, 0, 0, TimeSpan.Zero);
+Assert(UpdateCheckPolicy.IsDue(null, updateCheckNow), "an update check with no recorded history is due immediately");
+Assert(!UpdateCheckPolicy.IsDue(updateCheckNow.AddHours(-23), updateCheckNow), "an update check inside the daily window is not due");
+Assert(UpdateCheckPolicy.IsDue(updateCheckNow.AddHours(-24), updateCheckNow), "an update check exactly at the daily boundary is due");
+
+var sameAutomaticCheckCycle = updateCheckNow.AddHours(-4);
+Assert(UpdateDeferralPolicy.ShouldSuppressAutomaticPrompt("0.14.0", updateCheckNow.AddHours(-1), "0.14.0", sameAutomaticCheckCycle), "deferring a version suppresses its automatic prompt for the current daily check cycle");
+Assert(!UpdateDeferralPolicy.ShouldSuppressAutomaticPrompt("0.14.0", updateCheckNow.AddHours(-1), "0.14.0", updateCheckNow), "a deferred prompt is eligible again at the next daily check even when less than 24 hours have elapsed since the click");
+Assert(!UpdateDeferralPolicy.ShouldSuppressAutomaticPrompt("0.14.0", updateCheckNow.AddHours(-1), "0.15.0", sameAutomaticCheckCycle), "deferring one version never suppresses a newer version's prompt");
+Assert(!UpdateDeferralPolicy.ShouldSuppressAutomaticPrompt(null, null, "0.14.0", sameAutomaticCheckCycle), "no prior deferral never suppresses the prompt");
+
+var updateSettingsTestDirectory = Path.Combine(Path.GetTempPath(), "CodexTracker.Tests", Guid.NewGuid().ToString("N"));
+var updateSettingsTestPath = Path.Combine(updateSettingsTestDirectory, "settings.json");
+try
+{
+    var updateDeferredAt = new DateTimeOffset(2026, 8, 17, 9, 30, 0, TimeSpan.Zero);
+    var lastChecked = new DateTimeOffset(2026, 8, 17, 8, 0, 0, TimeSpan.Zero);
+    var updateSettings = new AppSettings(LastUpdateCheckUtc: lastChecked, DeferredUpdateVersion: "0.14.0", UpdateDeferredAtUtc: updateDeferredAt);
+    new SettingsStore(updateSettingsTestPath).Save(updateSettings);
+    var reloadedUpdateSettings = new SettingsStore(updateSettingsTestPath).Load();
+    Assert(reloadedUpdateSettings.LastUpdateCheckUtc == lastChecked && reloadedUpdateSettings.DeferredUpdateVersion == "0.14.0" && reloadedUpdateSettings.UpdateDeferredAtUtc == updateDeferredAt, "update check and deferral state round trip through settings persistence");
+}
+finally
+{
+    if (Directory.Exists(updateSettingsTestDirectory)) Directory.Delete(updateSettingsTestDirectory, true);
+}
+Assert(SettingsStore.Normalize(new AppSettings(DeferredUpdateVersion: "   ")).DeferredUpdateVersion is null, "a blank deferred update version normalizes to null so it never suppresses future prompts");
+
+Assert(mainWindowSource.Contains("_ = CheckForUpdatesIfDueAsync();", StringComparison.Ordinal), "startup schedules an update check alongside quota, agents and local analytics");
+var refreshMethodStart = mainWindowSource.IndexOf("private async Task RefreshAsync()", StringComparison.Ordinal);
+var refreshMethodEnd = mainWindowSource.IndexOf("private async Task RefreshAnalyticsAsync()", refreshMethodStart, StringComparison.Ordinal);
+var refreshMethod = refreshMethodStart >= 0 && refreshMethodEnd > refreshMethodStart ? mainWindowSource.Substring(refreshMethodStart, refreshMethodEnd - refreshMethodStart) : string.Empty;
+Assert(refreshMethod.Contains("_ = CheckForUpdatesIfDueAsync();", StringComparison.Ordinal) && refreshMethod.IndexOf("_ = CheckForUpdatesIfDueAsync();", StringComparison.Ordinal) < refreshMethod.IndexOf("if (_client is null)", StringComparison.Ordinal), "the 60-second refresh timer keeps daily update checks alive even while the app-server is disconnected");
+Assert(mainWindowSource.Contains("Persist the automatic attempt before touching the network", StringComparison.Ordinal) && mainWindowSource.Contains("_pendingUpdate = null;", StringComparison.Ordinal), "a failed automatic check is rate-limited for a day and cannot show a stale pending update");
+Assert(mainWindowSource.Contains("else if (_viewModel.Expanded) MaybeShowPendingUpdateDialog();", StringComparison.Ordinal), "an update found while compact stays pending and only asks to show once detailed mode is confirmed active");
+var mainWindowSourceToggleDetailedStart = mainWindowSource.IndexOf("private void ToggleDetailed(", StringComparison.Ordinal);
+var mainWindowSourceToggleDetailedEnd = mainWindowSource.IndexOf("private void Settings(", mainWindowSourceToggleDetailedStart, StringComparison.Ordinal);
+var toggleDetailedBody = mainWindowSource.Substring(mainWindowSourceToggleDetailedStart, mainWindowSourceToggleDetailedEnd - mainWindowSourceToggleDetailedStart);
+var toggleDetailedRefreshAnalyticsIndex = toggleDetailedBody.LastIndexOf("_ = RefreshAnalyticsAsync();", StringComparison.Ordinal);
+var toggleDetailedMaybeShowIndex = toggleDetailedBody.IndexOf("MaybeShowPendingUpdateDialog();", StringComparison.Ordinal);
+var toggleDetailedExpandedGuardIndex = toggleDetailedBody.LastIndexOf("if (_viewModel.Expanded)", StringComparison.Ordinal);
+Assert(toggleDetailedRefreshAnalyticsIndex >= 0 && toggleDetailedMaybeShowIndex > toggleDetailedRefreshAnalyticsIndex &&
+       toggleDetailedMaybeShowIndex - toggleDetailedRefreshAnalyticsIndex < 80 && toggleDetailedExpandedGuardIndex < toggleDetailedMaybeShowIndex,
+       "switching into detailed mode reveals a pending update dialog right after the existing expanded-only analytics refresh, never in compact mode");
+Assert(mainWindowSource.Contains("private void DeferUpdate(object sender, RoutedEventArgs e)", StringComparison.Ordinal) &&
+       mainWindowSource.Contains("DeferredUpdateVersion = version, UpdateDeferredAtUtc = DateTimeOffset.UtcNow", StringComparison.Ordinal),
+       "deferring an update persists the version and timestamp used to suppress only its current automatic check cycle");
+Assert(mainWindowXaml.Contains("Click=\"CheckForUpdatesManual\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Loc.CheckForUpdates", StringComparison.Ordinal), "settings expose a manual check-for-updates action");
+Assert(mainWindowXaml.Contains("x:Name=\"UpdateDialogPanel\"", StringComparison.Ordinal) &&
+       mainWindowXaml.Contains("Visibility=\"{Binding IsUpdateDialogOpen, Converter={StaticResource BooleanToVisibility}}\"", StringComparison.Ordinal) &&
+       mainWindowXaml.Contains("Click=\"StartUpdate\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Click=\"DeferUpdate\"", StringComparison.Ordinal),
+       "the update dialog is themed like the rest of the widget and exposes update/defer actions");
+Assert(LocalizationManager.HasTextKey("CheckForUpdates") && LocalizationManager.HasTextKey("UpdateAvailableTitle") && LocalizationManager.HasTextKey("UpdateNow") && LocalizationManager.HasTextKey("UpdateLater") && LocalizationManager.HasTextKey("UpdateFailed"), "update strings are localized in both supported languages");
+
 Console.WriteLine("All CodexTracker core tests passed.");
 
 static void Assert(bool condition, string message) { if (!condition) throw new InvalidOperationException("Test failed: " + message); }

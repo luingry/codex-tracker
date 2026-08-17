@@ -15,5 +15,11 @@
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- UpdateController's GithubUpdateClient dependency (CodexTracker.Core) exposes an HttpClient
+         parameter on its public constructor; net48 project references don't flow framework
+         Reference items transitively, so this project needs its own reference to resolve it. -->
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
   <ItemGroup><Resource Include="..\..\assets\fonts\SourceSans3.ttf" Link="assets\fonts\SourceSans3.ttf" /><Resource Include="..\..\assets\fonts\AtkinsonHyperlegibleNext.ttf" Link="assets\fonts\AtkinsonHyperlegibleNext.ttf" /></ItemGroup>
 </Project>
