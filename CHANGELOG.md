@@ -1,5 +1,75 @@
 # Changelog
 
+## [0.18.4] - 2026-08-20
+
+### Changed
+
+- Added category-share bars and aligned estimated cost-before-token values in the shared usage tooltips; ranking tooltips now open immediately on hover.
+
+## [0.18.3] - 2026-08-20
+
+### Changed
+
+- Unified daily-usage and model-ranking tooltips with a localized structured layout for token categories, estimated costs, and totals.
+
+## [0.18.2] - 2026-08-20
+
+### Fixed
+
+- Kept the chat-search clear control transparent in every interaction state and matched its icon contrast to the search affordance.
+
+## [0.18.1] - 2026-08-20
+
+### Fixed
+
+- Replaced the chat-search magnifier and clear affordance with the tracker’s high-contrast, consistent vector icon treatment.
+
+## [0.18.0] - 2026-08-20
+
+### Added
+
+- Details by chat now identifies projects only from locally verifiable Git roots, consolidates worktrees under their parent repository, and adds search affordances for search and clear.
+
+## [0.17.2] - 2026-08-20
+
+### Changed
+
+- Refined Details by chat project headers to a transparent agent-list-style divider, restored individual chat cards, and removed the redundant total progress bar.
+
+## [0.17.1] - 2026-08-20
+
+### Fixed
+
+- Chat search now filters projects and chats without materializing results until a project is manually expanded; project headers share a single compact list surface.
+
+## [0.17.0] - 2026-08-20
+
+### Changed
+
+- Made Details by chat substantially more compact with collapsed lazy project groups, title/project search, and token-share bars while keeping cost estimates available to the analytics model without rendering them in the window.
+
+## [0.16.0] - 2026-08-20
+
+### Added
+
+- The widget agent list now groups chats by their session project, with a subtle project separator and a literal `Sem projeto` group for sessions without a working directory.
+
+## [0.15.0] - 2026-08-20
+
+### Added
+
+- Added a current-month Details by chat window below daily usage, grouping local chats by sanitized project name and showing mutually exclusive token categories with their honest estimated costs.
+
+## [0.14.2] - 2026-08-20
+
+### Added
+
+- Hovering a ranking row or a daily-usage bar now shows mutually exclusive cache-read, input, output, and reasoning token categories, with the estimated cost beneath each value and a final total.
+
+### Fixed
+
+- Local token totals and estimated costs no longer count reasoning output twice; reasoning remains a separately visible subset of output in the breakdown.
+
 ## [0.14.1] - 2026-08-17
 
 ### Fixed

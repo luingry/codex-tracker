@@ -14,7 +14,8 @@ public sealed record ActiveAgent(
     string Model,
     string Effort,
     DateTimeOffset StartedAt,
-    DateTimeOffset LastActivityAt);
+    DateTimeOffset LastActivityAt,
+    string? ProjectPath = null);
 
 public sealed record CompletedAgentWork(
     string CompletionId,
@@ -25,7 +26,8 @@ public sealed record CompletedAgentWork(
     string Model,
     string Effort,
     DateTimeOffset StartedAt,
-    DateTimeOffset CompletedAt);
+    DateTimeOffset CompletedAt,
+    string? ProjectPath = null);
 
 public sealed record AgentActivitySnapshot(
     IReadOnlyList<ActiveAgent> ActiveAgents,
@@ -92,6 +94,8 @@ public sealed class AgentActivityService
             .Select(group => group.OrderByDescending(state => state.LastActivityAt).First())
             .ToArray();
 
+        var activeStatesByThread = activeStates.ToDictionary(state => state.ThreadId, StringComparer.OrdinalIgnoreCase);
+        activeStates = activeStates.Select(state => ResolveProjectPath(state, activeStatesByThread)).ToArray();
         var activeAgents = OrderHierarchy(activeStates)
             .Select(ordered => ToActiveAgent(ordered.State, ordered.Depth, titles))
             .ToArray();
@@ -135,6 +139,19 @@ public sealed class AgentActivityService
         return result;
     }
 
+    private static RolloutState ResolveProjectPath(RolloutState state, IReadOnlyDictionary<string, RolloutState> statesByThread)
+    {
+        if (!string.IsNullOrWhiteSpace(state.ProjectPath)) return state;
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { state.ThreadId };
+        var parentThreadId = state.ParentThreadId;
+        while (!string.IsNullOrWhiteSpace(parentThreadId) && visited.Add(parentThreadId!) && statesByThread.TryGetValue(parentThreadId!, out var parent))
+        {
+            if (!string.IsNullOrWhiteSpace(parent.ProjectPath)) return state with { ProjectPath = parent.ProjectPath };
+            parentThreadId = parent.ParentThreadId;
+        }
+        return state;
+    }
+
     private static ActiveAgent ToActiveAgent(RolloutState state, int hierarchyDepth, IReadOnlyDictionary<string, string>? titles)
     {
         var title = titles is not null && titles.TryGetValue(state.ThreadId, out var mappedTitle) && !string.IsNullOrWhiteSpace(mappedTitle)
@@ -144,7 +161,7 @@ public sealed class AgentActivityService
             string.IsNullOrWhiteSpace(state.Status) ? "Trabalhando" : state.Status,
             string.IsNullOrWhiteSpace(state.Model) ? "unknown" : state.Model,
             string.IsNullOrWhiteSpace(state.Effort) ? "unknown" : state.Effort,
-            state.StartedAt!.Value, state.LastActivityAt);
+            state.StartedAt!.Value, state.LastActivityAt, state.ProjectPath);
     }
 
     private static string FallbackTitle(RolloutState state)
@@ -172,7 +189,8 @@ public sealed class AgentActivityService
             string.IsNullOrWhiteSpace(state.Model) ? "unknown" : state.Model,
             string.IsNullOrWhiteSpace(state.Effort) ? "unknown" : state.Effort,
             state.CompletedStartedAt ?? state.CompletedAt!.Value,
-            state.CompletedAt!.Value);
+            state.CompletedAt!.Value,
+            state.ProjectPath);
     }
 
     private static RolloutState Parse(string path, long offset, RolloutState initial)
@@ -197,7 +215,7 @@ public sealed class AgentActivityService
                     var threadId = ReadString(payload, "id") ?? ReadString(payload, "session_id") ?? path;
                     var source = ReadString(payload, "thread_source");
                     var parent = ReadString(payload, "parent_thread_id") ?? ReadString(payload, "forked_from_id");
-                    state = state with { ThreadId = threadId, ParentThreadId = parent, IsSubagent = source == "subagent" || !string.IsNullOrWhiteSpace(parent), AgentPath = ReadString(payload, "agent_path"), AgentNickname = ReadString(payload, "agent_nickname") };
+                    state = state with { ThreadId = threadId, ParentThreadId = parent, IsSubagent = source == "subagent" || !string.IsNullOrWhiteSpace(parent), AgentPath = ReadString(payload, "agent_path"), AgentNickname = ReadString(payload, "agent_nickname"), ProjectPath = ReadString(payload, "cwd") };
                     continue;
                 }
 
@@ -272,8 +290,8 @@ public sealed class AgentActivityService
     private sealed record CachedRollout(RolloutSignature Signature, bool HadFinalNewline, RolloutState State);
     private readonly record struct RolloutSignature(long Length, long LastWriteUtcTicks);
     private sealed record OrderedState(RolloutState State, int Depth);
-    private sealed record RolloutState(string ThreadId, string? ParentThreadId, bool IsSubagent, string? AgentPath, string? AgentNickname, string? ActiveTurnId, DateTimeOffset? StartedAt, string? CompletedTurnId, DateTimeOffset? CompletedStartedAt, DateTimeOffset? CompletedAt, DateTimeOffset LastActivityAt, string Model, string Effort, string Status)
+    private sealed record RolloutState(string ThreadId, string? ParentThreadId, bool IsSubagent, string? AgentPath, string? AgentNickname, string? ProjectPath, string? ActiveTurnId, DateTimeOffset? StartedAt, string? CompletedTurnId, DateTimeOffset? CompletedStartedAt, DateTimeOffset? CompletedAt, DateTimeOffset LastActivityAt, string Model, string Effort, string Status)
     {
-        public static RolloutState Empty { get; } = new("", null, false, null, null, null, null, null, null, null, DateTimeOffset.MinValue, "unknown", "unknown", "Trabalhando");
+        public static RolloutState Empty { get; } = new("", null, false, null, null, null, null, null, null, null, null, DateTimeOffset.MinValue, "unknown", "unknown", "Trabalhando");
     }
 }

@@ -47,6 +47,7 @@ public partial class MainWindow : Window
     private bool _agentStateInitialized;
     private UsageAnalytics? _lastLoadedAnalytics;
     private UpdateAvailability? _pendingUpdate;
+    private ChatDetailsWindow? _chatDetailsWindow;
     private CancellationTokenSource? _updateInstallCancellation;
     private bool _dragCandidate;
     private bool _nativeDragInProgress;
@@ -495,6 +496,20 @@ public partial class MainWindow : Window
         _settings = _settings with { IsAgentListExpanded = isOpen };
         Save();
         RepositionAgentListPopup();
+    }
+
+    private void OpenChatDetails(object sender, RoutedEventArgs e)
+    {
+        if (_chatDetailsWindow is { IsVisible: true })
+        {
+            _chatDetailsWindow.Activate();
+            return;
+        }
+        _viewModel.ResetChatDetailsView();
+        var window = new ChatDetailsWindow(_viewModel) { Owner = this };
+        _chatDetailsWindow = window;
+        window.Closed += (_, _) => { if (ReferenceEquals(_chatDetailsWindow, window)) _chatDetailsWindow = null; };
+        window.Show();
     }
 
     private void OpenAgentThread(object sender, RoutedEventArgs e)

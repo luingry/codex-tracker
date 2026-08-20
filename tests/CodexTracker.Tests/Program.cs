@@ -143,15 +143,27 @@ Assert(WidgetPlacementPolicy.Restore(removedMonitorBounds, dualMonitorWorkAreas)
 var rankingNow = DateTimeOffset.Now;
 var rankingCycleEnd = new DateTimeOffset(2026, 8, 16, 12, 0, 0, TimeSpan.Zero);
 var rankingCycleStart = rankingCycleEnd.AddMinutes(-10080);
-var rankingAnalytics = new UsageAnalytics(0, 143, 0, 0, 0, [new ModelUsage("month-model", 99, 9.9m, true), new ModelUsage("no-tariff-model", 44, 0, false), new ModelUsage("unknown", 33, 0, false), new ModelUsage("unknown-model", 22, 0, false)], UsdBrl: 5m, ModelTimeline:
+var rankingAnalytics = new UsageAnalytics(0, 143, 0, 0, 0,
 [
-    new(rankingNow.AddMinutes(-1), "day-model", 11, 1.25m, true),
-    new(rankingCycleStart.AddMinutes(1), "cycle-model", 50, 2.5m, true),
+    new ModelUsage("month-model", 99, 9.9m, true, new TokenUsageBreakdown(9, 20, 30, 40, .9m, 1.2m, 3.3m, 4.5m)),
+    new ModelUsage("no-tariff-model", 44, 0, false, new TokenUsageBreakdown(4, 10, 12, 18)),
+    new ModelUsage("unknown", 33, 0, false), new ModelUsage("unknown-model", 22, 0, false)
+], UsdBrl: 5m, ModelTimeline:
+[
+    new(rankingNow.AddMinutes(-1), "day-model", 11, 1.25m, true, new TokenUsageBreakdown(1, 2, 3, 5, .05m, .2m, .3m, .7m)),
+    new(rankingCycleStart.AddMinutes(1), "cycle-model", 50, 2.5m, true, new TokenUsageBreakdown(5, 10, 15, 20, .1m, .4m, .75m, 1.25m)),
     new(rankingCycleStart.AddMinutes(-1), "outside-cycle-model", 99, 9.9m, true)
 ]);
 var rankingViewModel = new MainViewModel();
 rankingViewModel.Apply(new RateLimitSnapshot([new("codex:primary", "Weekly limit", 16, rankingCycleEnd, 10080)], null, null, null, rankingNow), rankingAnalytics);
 Assert(rankingViewModel.Ranking.First().Model == "month-model" && rankingViewModel.Ranking.First().SecondaryText == "R$ 49,50" && rankingViewModel.Ranking.Single(row => row.Model == "no-tariff-model").SecondaryText == "sem tarifa", "monthly ranking shows the priced model cost converted with analytics USD/BRL and preserves the localized no-tariff state for unpriced models in the same secondary line");
+var monthlyTooltip = rankingViewModel.Ranking.Single(row => row.Model == "month-model").Tooltip;
+Assert(monthlyTooltip.Contains("Leitura em cache: 9", StringComparison.Ordinal) && monthlyTooltip.Contains("R$ 4,50", StringComparison.Ordinal) && monthlyTooltip.Contains("Entrada: 20", StringComparison.Ordinal) && monthlyTooltip.Contains("R$ 6,00", StringComparison.Ordinal) && monthlyTooltip.Contains("Saída: 30", StringComparison.Ordinal) && monthlyTooltip.Contains("R$ 16,50", StringComparison.Ordinal) && monthlyTooltip.Contains("Raciocínio: 40", StringComparison.Ordinal) && monthlyTooltip.Contains("R$ 22,50", StringComparison.Ordinal) && monthlyTooltip.Contains("Total: 99", StringComparison.Ordinal) && monthlyTooltip.EndsWith("R$ 49,50", StringComparison.Ordinal) && !monthlyTooltip.Contains("cache write", StringComparison.OrdinalIgnoreCase), "monthly ranking tooltip shows localized mutually exclusive token categories, each estimated cost, and the final total without cache write");
+var monthlyTooltipData = rankingViewModel.Ranking.Single(row => row.Model == "month-model").TooltipData;
+Assert(monthlyTooltipData.Title == "month-model" && monthlyTooltipData.Categories.Count == 4 && monthlyTooltipData.Categories[0] == new TokenUsageTooltipLine("Leitura em cache", "9", "R$ 4,50", 9d / 99d) && monthlyTooltipData.Categories[3] == new TokenUsageTooltipLine("Raciocínio", "40", "R$ 22,50", 40d / 99d) && monthlyTooltipData.Total == new TokenUsageTooltipLine("Total", "99", "R$ 49,50", 1d) && monthlyTooltipData.EstimateNote == "Valores estimados", "ranking supplies complete localized tooltip data with token-share fractions without parsing its retained accessibility text");
+var zeroTooltipData = TokenUsageTooltip.Create("zero-model", TokenUsageBreakdown.Zero, false, 1m, "USD");
+Assert(zeroTooltipData.Categories.Count == 4 && zeroTooltipData.Categories.All(line => line.Fraction == 0d) && zeroTooltipData.Total.Fraction == 0d, "tooltip token-share fractions are zero when total tokens are zero");
+Assert(rankingViewModel.Ranking.Single(row => row.Model == "no-tariff-model").Tooltip.Contains("sem tarifa", StringComparison.Ordinal), "unpriced model tooltip retains the localized no-tariff state instead of fabricating category costs");
 Assert(rankingViewModel.Ranking.All(row => row.Model != "unknown") && rankingViewModel.Ranking.Single(row => row.Model == "Modelo não registrado").Tokens == "33" && rankingViewModel.Ranking.Single(row => row.Model == "unknown-model").Tokens == "22", "ranking localizes only the internal unknown bucket without hiding tokens or renaming literal model names");
 rankingViewModel.SetCurrency("USD");
 Assert(rankingViewModel.Ranking.First().SecondaryText == "US$ 9,90", "monthly ranking refreshes priced costs when the selected currency changes to USD");
@@ -162,8 +174,12 @@ rankingViewModel.SetCurrency("BRL");
 Assert(rankingViewModel.Ranking.First().SecondaryText == "R$ 49.50", "ranking refreshes BRL cost formatting using the active en-US culture");
 rankingViewModel.IsRankingDay = true;
 Assert(rankingViewModel.Ranking.Single().Model == "day-model" && rankingViewModel.Ranking.Single().SecondaryText == "R$ 6.25", "day ranking filters model usage and uses the day CostUsd rather than the monthly aggregate");
+var dayTooltip = rankingViewModel.Ranking.Single().Tooltip;
+Assert(dayTooltip.Contains("Cache read: 1", StringComparison.Ordinal) && dayTooltip.Contains("R$ 0.25", StringComparison.Ordinal) && dayTooltip.Contains("Input: 2", StringComparison.Ordinal) && dayTooltip.Contains("R$ 1.00", StringComparison.Ordinal) && dayTooltip.Contains("Output: 3", StringComparison.Ordinal) && dayTooltip.Contains("R$ 1.50", StringComparison.Ordinal) && dayTooltip.Contains("Reasoning: 5", StringComparison.Ordinal) && dayTooltip.Contains("R$ 3.50", StringComparison.Ordinal) && dayTooltip.Contains("Total: 11", StringComparison.Ordinal) && dayTooltip.EndsWith("R$ 6.25", StringComparison.Ordinal) && !dayTooltip.Contains("cache write", StringComparison.OrdinalIgnoreCase), "day ranking tooltip uses its filtered breakdown and localized category costs");
 rankingViewModel.IsRankingWeek = true;
 Assert(rankingViewModel.Ranking.Any(row => row.Model == "cycle-model" && row.SecondaryText == "R$ 12.50") && rankingViewModel.Ranking.All(row => row.Model != "outside-cycle-model"), "week ranking uses only the active Codex quota cycle and its period CostUsd, excluding usage outside the cycle");
+var weekTooltip = rankingViewModel.Ranking.Single(row => row.Model == "cycle-model").Tooltip;
+Assert(weekTooltip.Contains("Cache read: 5", StringComparison.Ordinal) && weekTooltip.Contains("R$ 0.50", StringComparison.Ordinal) && weekTooltip.Contains("Input: 10", StringComparison.Ordinal) && weekTooltip.Contains("R$ 2.00", StringComparison.Ordinal) && weekTooltip.Contains("Output: 15", StringComparison.Ordinal) && weekTooltip.Contains("R$ 3.75", StringComparison.Ordinal) && weekTooltip.Contains("Reasoning: 20", StringComparison.Ordinal) && weekTooltip.Contains("R$ 6.25", StringComparison.Ordinal) && weekTooltip.Contains("Total: 50", StringComparison.Ordinal) && weekTooltip.EndsWith("R$ 12.50", StringComparison.Ordinal) && !weekTooltip.Contains("cache write", StringComparison.OrdinalIgnoreCase), "week ranking tooltip uses only the official-cycle model breakdown with localized category costs and total");
 LocalizationManager.Apply("pt-BR");
 rankingViewModel.RefreshLocalization();
 rankingViewModel.ApplyQuota(new RateLimitSnapshot([], null, null, null, rankingNow));
@@ -239,8 +255,39 @@ var agentListTemplate = agentListStart >= 0 && agentListEnd > agentListStart ? m
 var roundedClipBorderSource = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "RoundedClipBorder.cs"));
 Assert(agentListTemplate.Contains("x:Name=\"AgentListWrapper\" Width=\"288\" MaxHeight=\"350\" Background=\"Transparent\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Border.Effect><DropShadowEffect BlurRadius=\"12\" ShadowDepth=\"3\" Opacity=\".28\" Color=\"#151A18\" /></Border.Effect>", StringComparison.Ordinal) && agentListTemplate.Contains("<local:RoundedClipBorder x:Name=\"AgentListClipSurface\" Padding=\"0\" CornerRadius=\"12\" Background=\"{DynamicResource DetailedSurface}\"", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"AgentRow\" Margin=\"0\"", StringComparison.Ordinal) && agentListTemplate.Contains("<ContentPresenter Margin=\"0,8\" HorizontalAlignment=\"{TemplateBinding HorizontalContentAlignment}\" VerticalAlignment=\"{TemplateBinding VerticalContentAlignment}\" />", StringComparison.Ordinal) && agentListTemplate.Contains("<Border Margin=\"{Binding Indent}\" Padding=\"15,6\">", StringComparison.Ordinal) && roundedClipBorderSource.Contains("Clip = new RectangleGeometry(new Rect(RenderSize), radius, radius);", StringComparison.Ordinal), "agent list keeps its shadow on an outer un-clipped wrapper while an inner dynamically sized rounded geometry clips every contiguous full-width row interaction");
 Assert(agentListTemplate.Contains("Text=\"{Binding ModelAndEffort}\"", StringComparison.Ordinal) && agentListTemplate.Contains("Foreground=\"{DynamicResource AgentMetadataAccent}\"", StringComparison.Ordinal), "agent model and effort bind to the contrast-safe muted accent resource instead of fixed opacity or generic secondary ink");
+Assert(agentListTemplate.Contains("Visibility=\"{Binding ShowsProjectSeparator, Converter={StaticResource BooleanToVisibility}}\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Grid.ColumnDefinitions><ColumnDefinition Width=\"Auto\" /><ColumnDefinition Width=\"*\" /></Grid.ColumnDefinitions>", StringComparison.Ordinal) && agentListTemplate.Contains("Text=\"{Binding ProjectName}\" FontSize=\"9.2\" FontWeight=\"SemiBold\" Foreground=\"{DynamicResource SoftInk}\" Opacity=\".62\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Border Grid.Column=\"1\" Height=\"1\" Background=\"{DynamicResource InputSurface}\" Opacity=\".65\" VerticalAlignment=\"Center\" Margin=\"8,0,0,0\" />", StringComparison.Ordinal), "agent projects render a subtle name-left divider with the project line extending to its right");
 Assert(agentListTemplate.Contains("<Grid.ColumnDefinitions><ColumnDefinition Width=\"Auto\" /><ColumnDefinition Width=\"*\" /></Grid.ColumnDefinitions>", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"KindLabel\" Text=\"{Binding Type}\" MaxWidth=\"58\"", StringComparison.Ordinal) && agentListTemplate.Contains("Margin=\"0,0,6,0\"", StringComparison.Ordinal) && agentListTemplate.Contains("Grid.Column=\"1\" Text=\"{Binding ModelAndEffort}\"", StringComparison.Ordinal) && agentListTemplate.Contains("TextTrimming=\"CharacterEllipsis\" HorizontalAlignment=\"Left\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Grid Grid.Column=\"1\" HorizontalAlignment=\"Right\" VerticalAlignment=\"Center\">", StringComparison.Ordinal) && agentListTemplate.Contains("<TranslateTransform Y=\"-9\" />", StringComparison.Ordinal) && !agentListTemplate.Contains("<StackPanel Grid.Column=\"1\" HorizontalAlignment=\"Right\" VerticalAlignment=\"Center\">", StringComparison.Ordinal) && !agentListTemplate.Contains("TextAlignment=\"Right\"", StringComparison.Ordinal), "completed-row check overlays above elapsed without changing the status-row height or pushing elapsed below reasoning");
 Assert(mainWindowXaml.Contains("Text=\"{Binding Tokens}\" FontFamily=\"./assets/fonts/#Source Sans 3\" FontSize=\"10\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Text=\"{Binding SecondaryText}\" FontFamily=\"./assets/fonts/#Source Sans 3\" FontSize=\"8\" Foreground=\"{DynamicResource SoftInk}\"", StringComparison.Ordinal) && !mainWindowXaml.Contains("Text=\"{Binding Cost}\"", StringComparison.Ordinal) && !mainWindowXaml.Contains("Text=\"{Binding TariffNote}\"", StringComparison.Ordinal), "ranking rows use exactly one small numeric secondary line below tokens for either the estimated cost or the localized no-tariff text");
+var tooltipPresentationSource = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "TokenUsageTooltip.cs"));
+var tokenTooltipAppXaml = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "App.xaml"));
+Assert(mainWindowXaml.Contains("ToolTip Content=\"{Binding TooltipData}\" Style=\"{StaticResource TokenUsageToolTip}\"", StringComparison.Ordinal) && dailyUsageChartSource.Contains("_tooltip.SetResourceReference(StyleProperty, \"TokenUsageToolTip\")", StringComparison.Ordinal) && dailyUsageChartSource.Contains("TokenUsageTooltip.Create(", StringComparison.Ordinal) && tooltipPresentationSource.Contains("Line(\"CachedRead\"", StringComparison.Ordinal) && tooltipPresentationSource.Contains("Line(\"Reasoning\"", StringComparison.Ordinal) && tooltipPresentationSource.Contains("Line(\"Total\"", StringComparison.Ordinal) && !tooltipPresentationSource.Contains("cache write", StringComparison.OrdinalIgnoreCase), "ranking and daily usage hovers share one structured source for the four supported token categories and total without presenting cache write");
+var tokenTooltipCategoriesStart = tokenTooltipAppXaml.IndexOf("<ItemsControl ItemsSource=\"{Binding Categories}\">", StringComparison.Ordinal);
+var tokenTooltipCategoriesEnd = tokenTooltipAppXaml.IndexOf("</ItemsControl>", tokenTooltipCategoriesStart, StringComparison.Ordinal);
+var tokenTooltipCategories = tokenTooltipCategoriesStart >= 0 && tokenTooltipCategoriesEnd > tokenTooltipCategoriesStart ? tokenTooltipAppXaml.Substring(tokenTooltipCategoriesStart, tokenTooltipCategoriesEnd - tokenTooltipCategoriesStart) : string.Empty;
+var tokenTooltipTotalStart = tokenTooltipAppXaml.IndexOf("<Grid Grid.Row=\"3\">", StringComparison.Ordinal);
+var tokenTooltipTotalEnd = tokenTooltipAppXaml.IndexOf("</Grid>", tokenTooltipTotalStart, StringComparison.Ordinal);
+var tokenTooltipTotal = tokenTooltipTotalStart >= 0 && tokenTooltipTotalEnd > tokenTooltipTotalStart ? tokenTooltipAppXaml.Substring(tokenTooltipTotalStart, tokenTooltipTotalEnd - tokenTooltipTotalStart) : string.Empty;
+Assert(tokenTooltipAppXaml.Contains("x:Key=\"TokenUsageToolTip\"", StringComparison.Ordinal) && tokenTooltipAppXaml.Contains("DataType=\"{x:Type local:TokenUsageTooltip}\"", StringComparison.Ordinal) && tokenTooltipAppXaml.Contains("ItemsSource=\"{Binding Categories}\"", StringComparison.Ordinal) && tokenTooltipAppXaml.Contains("{DynamicResource DetailedSurface}", StringComparison.Ordinal), "shared token tooltip retains the localized structured template and dynamic theme surface");
+Assert(tokenTooltipCategories.Contains("<Grid.RowDefinitions><RowDefinition Height=\"Auto\" /><RowDefinition Height=\"Auto\" /></Grid.RowDefinitions>", StringComparison.Ordinal) && tokenTooltipCategories.Split(new[] { "<ProgressBar " }, StringSplitOptions.None).Length == 2 && tokenTooltipCategories.Contains("Value=\"{Binding Fraction}\" Maximum=\"1\" Height=\"3\"", StringComparison.Ordinal) && tokenTooltipCategories.Contains("Margin=\"0,3,0,0\"", StringComparison.Ordinal) && tokenTooltipCategories.Contains("Background=\"{DynamicResource Sage}\" Foreground=\"{DynamicResource Accent}\"", StringComparison.Ordinal) && !tokenTooltipTotal.Contains("<ProgressBar ", StringComparison.Ordinal), "shared token tooltip gives each of the four category-share bars its full height plus spacing and renders no total bar");
+Assert(tokenTooltipCategories.IndexOf("Text=\"{Binding Cost}\"", StringComparison.Ordinal) < tokenTooltipCategories.IndexOf("Text=\" · \"", StringComparison.Ordinal) && tokenTooltipCategories.IndexOf("Text=\" · \"", StringComparison.Ordinal) < tokenTooltipCategories.IndexOf("Text=\"{Binding Tokens}\"", StringComparison.Ordinal) && tokenTooltipCategories.Contains("Text=\"{Binding Cost}\" FontFamily=\"./assets/fonts/#Source Sans 3\" FontSize=\"8.5\" Foreground=\"{DynamicResource SoftInk}\"", StringComparison.Ordinal) && tokenTooltipCategories.Contains("Text=\"{Binding Tokens}\" FontFamily=\"./assets/fonts/#Source Sans 3\" FontSize=\"9.5\" FontWeight=\"SemiBold\" Foreground=\"{DynamicResource Ink}\"", StringComparison.Ordinal), "category tooltip values render cost dot tokens with the requested numeric typography and contrast");
+Assert(tokenTooltipTotal.IndexOf("Text=\"{Binding Total.Cost}\"", StringComparison.Ordinal) < tokenTooltipTotal.IndexOf("Text=\" · \"", StringComparison.Ordinal) && tokenTooltipTotal.IndexOf("Text=\" · \"", StringComparison.Ordinal) < tokenTooltipTotal.IndexOf("Text=\"{Binding Total.Tokens}\"", StringComparison.Ordinal) && tokenTooltipTotal.Contains("Text=\"{Binding Total.Cost}\" FontFamily=\"./assets/fonts/#Source Sans 3\" FontSize=\"8.5\" FontWeight=\"SemiBold\" Foreground=\"{DynamicResource SoftInk}\"", StringComparison.Ordinal) && tokenTooltipTotal.Contains("Text=\"{Binding Total.Tokens}\" FontFamily=\"./assets/fonts/#Source Sans 3\" FontSize=\"10\" FontWeight=\"Bold\" Foreground=\"{DynamicResource Ink}\"", StringComparison.Ordinal), "total tooltip values render cost dot tokens with matching soft cost and high-contrast token colors");
+Assert(mainWindowXaml.Contains("ToolTipService.InitialShowDelay=\"0\" ToolTipService.BetweenShowDelay=\"0\"", StringComparison.Ordinal), "ranking tooltip owner opens immediately without changing the daily chart hover policy");
+var chatDetailsXaml = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "ChatDetailsWindow.xaml"));
+var chatDetailsCode = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "ChatDetailsWindow.xaml.cs"));
+Assert(mainWindowXaml.IndexOf("<local:DailyUsageChart", StringComparison.Ordinal) < mainWindowXaml.IndexOf("Click=\"OpenChatDetails\"", StringComparison.Ordinal) && mainWindowSource.Contains("private void OpenChatDetails", StringComparison.Ordinal) && mainWindowSource.Contains("window.Closed +=", StringComparison.Ordinal), "details by chat is immediately below daily usage and safely recreates a secondary window after close");
+var openChatDetailsStart = mainWindowSource.IndexOf("private void OpenChatDetails", StringComparison.Ordinal);
+var openChatDetailsEnd = mainWindowSource.IndexOf("private void OpenAgentThread", openChatDetailsStart, StringComparison.Ordinal);
+var openChatDetailsCode = openChatDetailsStart >= 0 && openChatDetailsEnd > openChatDetailsStart ? mainWindowSource.Substring(openChatDetailsStart, openChatDetailsEnd - openChatDetailsStart) : string.Empty;
+Assert(openChatDetailsCode.IndexOf("_viewModel.ResetChatDetailsView();", StringComparison.Ordinal) < openChatDetailsCode.IndexOf("new ChatDetailsWindow", StringComparison.Ordinal) && openChatDetailsCode.IndexOf("_viewModel.ResetChatDetailsView();", StringComparison.Ordinal) > openChatDetailsCode.IndexOf("return;", StringComparison.Ordinal), "opening a new chat-details window resets its shared view state only after the already-open activation branch returns");
+Assert(chatDetailsXaml.Contains("Width=\"308\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("MinWidth=\"260\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("<local:RoundedClipBorder Background=\"{DynamicResource DetailedSurface}\" CornerRadius=\"12\">", StringComparison.Ordinal) && !chatDetailsXaml.Contains("BorderBrush=", StringComparison.Ordinal) && chatDetailsXaml.Contains("FontFamily=\"./assets/fonts/#Source Sans 3\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("Click=\"CloseWindow\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("AutomationProperties.Name=\"{DynamicResource Loc.CloseWindow}\"", StringComparison.Ordinal) && !chatDetailsXaml.Contains("cache write", StringComparison.OrdinalIgnoreCase), "chat details uses the compact borderless root surface, Source Sans 3 numeric styling, and an accessible close button without cache-write wording");
+Assert(chatDetailsXaml.Contains("Text=\"{Binding ChatSearch, UpdateSourceTrigger=PropertyChanged}\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("Text=\"{DynamicResource Loc.SearchChats}\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("HasVisibleChatProjects", StringComparison.Ordinal) && chatDetailsXaml.Contains("Click=\"ToggleProject\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("ItemsSource=\"{Binding Chats}\" Visibility=\"{Binding IsExpanded, Converter={StaticResource BooleanToVisibility}}\"", StringComparison.Ordinal) && !chatDetailsXaml.Contains("Cost", StringComparison.Ordinal) && !chatDetailsXaml.Contains("EstimateNote", StringComparison.Ordinal) && chatDetailsXaml.Contains("Value=\"{Binding CachedReadFraction}\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("Value=\"{Binding InputFraction}\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("Value=\"{Binding OutputFraction}\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("Value=\"{Binding ReasoningFraction}\"", StringComparison.Ordinal) && !chatDetailsXaml.Contains("TotalFraction", StringComparison.Ordinal) && chatDetailsXaml.Split(new[] { "<ProgressBar " }, StringSplitOptions.None).Length == 5 && LocalizationManager.HasTextKey("SearchChats"), "chat details render collapsed lazy project groups with an explicit collapsed visibility guard, localized search, exactly four category bars, and no estimated costs or total bar");
+var clearSearchStart = chatDetailsXaml.IndexOf("Click=\"ClearChatSearch\"", StringComparison.Ordinal);
+var clearSearchEnd = clearSearchStart >= 0 ? chatDetailsXaml.IndexOf("</Button></Grid>", clearSearchStart, StringComparison.Ordinal) : -1;
+var clearSearchButton = clearSearchStart >= 0 && clearSearchEnd > clearSearchStart ? chatDetailsXaml.Substring(clearSearchStart, clearSearchEnd - clearSearchStart) : string.Empty;
+Assert(chatDetailsXaml.Contains("Click=\"ClearChatSearch\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("AutomationProperties.Name=\"{DynamicResource Loc.ClearSearch}\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("<Setter Property=\"Visibility\" Value=\"Visible\"/>", StringComparison.Ordinal) && chatDetailsXaml.Contains("Padding=\"9,6,28,6\"", StringComparison.Ordinal) && clearSearchButton.Contains("Background=\"Transparent\" BorderThickness=\"0\" Cursor=\"Hand\"", StringComparison.Ordinal) && clearSearchButton.Contains("<ControlTemplate TargetType=\"Button\"><Border Background=\"Transparent\" BorderThickness=\"0\" Padding=\"{TemplateBinding Padding}\"><ContentPresenter HorizontalAlignment=\"Center\" VerticalAlignment=\"Center\"/>", StringComparison.Ordinal) && !clearSearchButton.Contains("HoverSurface", StringComparison.Ordinal) && chatDetailsCode.Contains("private void ClearChatSearch", StringComparison.Ordinal) && LocalizationManager.HasTextKey("ClearSearch"), "chat search reserves a right affordance and keeps its localized clear action transparent, clickable, and free of hover surfaces");
+Assert(chatDetailsXaml.Contains("<Ellipse Canvas.Left=\"3\" Canvas.Top=\"3\" Width=\"16\" Height=\"16\" Stroke=\"{DynamicResource SoftInk}\" StrokeThickness=\"1.7\"/>", StringComparison.Ordinal) && chatDetailsXaml.Contains("Data=\"M16.65,16.65L21,21\" Stroke=\"{DynamicResource SoftInk}\" StrokeThickness=\"1.7\" StrokeStartLineCap=\"Round\" StrokeEndLineCap=\"Round\"", StringComparison.Ordinal) && clearSearchButton.Contains("<Path Data=\"M18,6L6,18M6,6L18,18\" Stroke=\"{DynamicResource SoftInk}\" StrokeThickness=\"1.7\" StrokeStartLineCap=\"Round\" StrokeEndLineCap=\"Round\"/>", StringComparison.Ordinal), "chat search uses the Lucide-style canvas magnifier and matching rounded SoftInk clear X icon");
+Assert(chatDetailsXaml.Contains("<local:RoundedClipBorder Background=\"{DynamicResource InputSurface}\" CornerRadius=\"8\" Padding=\"8\" Margin=\"0,1\">", StringComparison.Ordinal) && chatDetailsXaml.Contains("Click=\"ToggleProject\" Background=\"Transparent\"", StringComparison.Ordinal) && !chatDetailsXaml.Contains("ProjectHeaderSurface\" Background=\"{DynamicResource InputSurface}\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("<Grid HorizontalAlignment=\"Stretch\">", StringComparison.Ordinal) && chatDetailsXaml.Contains("<Grid.ColumnDefinitions><ColumnDefinition Width=\"Auto\"/><ColumnDefinition Width=\"*\"/><ColumnDefinition Width=\"Auto\"/></Grid.ColumnDefinitions>", StringComparison.Ordinal) && chatDetailsXaml.Contains("x:Name=\"ProjectHeaderName\" Text=\"{Binding Project}\" FontSize=\"9.2\" FontWeight=\"SemiBold\" Foreground=\"{DynamicResource SoftInk}\" Opacity=\".62\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("x:Name=\"ProjectHeaderDivider\" Grid.Column=\"1\" Height=\".5\" Background=\"{DynamicResource SoftInk}\" Opacity=\".62\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("x:Name=\"ProjectHeaderChevron\" Grid.Column=\"2\" Width=\"10\" Height=\"5\" Stretch=\"Fill\" Data=\"M0,0 L5,5 L10,0\"", StringComparison.Ordinal) && chatDetailsXaml.Contains("<Setter Property=\"Data\" Value=\"M0,5 L5,0 L10,5\"/>", StringComparison.Ordinal) && chatDetailsXaml.Contains("<Setter TargetName=\"ProjectHeaderName\" Property=\"Foreground\" Value=\"{DynamicResource Ink}\"/>", StringComparison.Ordinal) && chatDetailsXaml.Contains("<Setter TargetName=\"ProjectHeaderDivider\" Property=\"Background\" Value=\"{DynamicResource Ink}\"/>", StringComparison.Ordinal) && chatDetailsXaml.Contains("<Setter TargetName=\"ProjectHeaderChevron\" Property=\"Stroke\" Value=\"{DynamicResource Ink}\"/>", StringComparison.Ordinal), "project headers stay transparent with matching base SoftInk opacity and hover all three header elements without adding a background, while chats retain independent cards and a refined divider/chevron");
+Assert(chatDetailsXaml.Contains("MouseLeftButtonDown=\"HeaderMouseLeftButtonDown\"", StringComparison.Ordinal) && chatDetailsCode.Contains("if (current is System.Windows.Controls.Button) return;", StringComparison.Ordinal) && chatDetailsCode.Contains("VisualTreeHelper.GetParent(current)", StringComparison.Ordinal) && !chatDetailsCode.Contains("MouseLeftButtonDown +=", StringComparison.Ordinal), "the secondary-window drag handler is limited to its header and excludes the close button and its visual descendants");
 Assert(mainWindowXaml.Contains("Text=\"{Binding Reset}\" FontFamily=\"./assets/fonts/#Source Sans 3\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Text=\"{Binding Forecast}\" FontFamily=\"./assets/fonts/#Source Sans 3\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Text=\"{Binding TodayCost}\" FontFamily=\"./assets/fonts/#Source Sans 3\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Text=\"{Binding Coverage}\" FontFamily=\"./assets/fonts/#Source Sans 3\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Text=\"{Binding AppVersion}\" FontFamily=\"./assets/fonts/#Source Sans 3\"", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"RateBox\" FontFamily=\"./assets/fonts/#Source Sans 3\"", StringComparison.Ordinal) && dailyUsageChartSource.Contains("new System.Windows.Media.FontFamily(\"./assets/fonts/#Source Sans 3\")", StringComparison.Ordinal), "all displayed numeric data uses the same Source Sans 3 family as the weekly percentage");
 Assert(mainWindowXaml.Contains("x:Name=\"AccentColorButton\" Click=\"ChooseAccentColor\"", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"AccentColorSwatch\"", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"AccentColorValue\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Color=\"{DynamicResource AccentGlow}\"", StringComparison.Ordinal), "settings expose an accessible accent color picker and the agent ripple glow follows the derived palette");
 Assert(mainWindowXaml.Contains("x:Name=\"LanguageBox\" SelectionChanged=\"PreviewLanguage\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Tag=\"pt-BR\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Tag=\"en-US\"", StringComparison.Ordinal) && mainWindowXaml.Contains("{DynamicResource Loc.Settings}", StringComparison.Ordinal), "settings expose pt-BR/en-US selection and static UI strings use dynamic localization resources");
@@ -323,6 +370,14 @@ agentRowsViewModel.ApplyAgents([restartedRoot], agentRowsNow.AddSeconds(10), tru
 agentRowsViewModel.ApplyUnreadCompletedAgents([unreadWork]);
 var restartedRow = agentRowsViewModel.AgentItems.Single();
 Assert(ReferenceEquals(completedRowBeforeRestart, restartedRow) && !restartedRow.IsCompleted && restartedRow.Status == LocalizationManager.TranslateKnown("Trabalhando") && restartedRow.Elapsed == "0m 05s" && !agentRowsViewModel.HasUnreadCompletedAgents, "restarting the same root chat reuses its row, updates status, and resets elapsed time without duplication");
+
+var projectGroupsViewModel = new MainViewModel();
+var sameNameProjectA = rootAgent with { ThreadId = "project-a", Title = "Projeto A", ProjectPath = @"D:\Dev\same" };
+var sameNameProjectB = rootAgent with { ThreadId = "project-b", Title = "Projeto B", ProjectPath = @"D:\Other\same" };
+var noProjectAgent = rootAgent with { ThreadId = "without-project", Title = "Sem raiz", ProjectPath = null };
+projectGroupsViewModel.ApplyAgents([sameNameProjectB, noProjectAgent, sameNameProjectA], agentRowsNow, false);
+projectGroupsViewModel.ApplyUnreadCompletedAgents([new CompletedAgentWork("project-a:done", "project-a-completed", "Agent", "Concluído A", "Concluído", "gpt-5.6-sol", "high", agentRowsNow.AddMinutes(-2), agentRowsNow, @"D:\Dev\same")]);
+Assert(projectGroupsViewModel.AgentItems.Select(row => row.ThreadId).SequenceEqual(["project-a", "project-a-completed", "project-b", "without-project"]) && projectGroupsViewModel.AgentItems.Select(row => row.ShowsProjectSeparator).SequenceEqual([true, false, true, true]) && projectGroupsViewModel.AgentItems.Last().ProjectName == "Sem projeto" && projectGroupsViewModel.AgentItems.Count(row => row.ProjectName == "same") == 3, "agent rows group by full project path deterministically, retain active work before completed work in each project, keep same-basename paths separate, and label missing paths Sem projeto");
 
 var resizeWorkArea = new ResizeWorkArea(-1920, 0, 1920, 1080);
 var compactStart = new ResizeBounds(-1500, 200, 124, 104);
@@ -417,10 +472,11 @@ Assert(currencyViewModel.WeeklyCost == "R$ 5,00" && currencyViewModel.TodayCost 
 currencyViewModel.SetCurrency("USD");
 Assert(currencyViewModel.CurrencyCode == "USD" && currencyViewModel.WeeklyCost == "US$ 1,00" && currencyViewModel.TodayCost == "US$ 0,50" && currencyViewModel.MonthCost == "US$ 2,00", "currency change immediately reformats retained weekly, daily and monthly costs without analytics refresh");
 var forecastViewModel = new MainViewModel();
-forecastViewModel.ApplyQuota(new RateLimitSnapshot([new("codex:primary", "Weekly", 80, nowForecast.AddDays(6), 10080)], null, null, null, nowForecast));
+var currentForecast = DateTimeOffset.Now;
+forecastViewModel.ApplyQuota(new RateLimitSnapshot([new("codex:primary", "Weekly", 80, currentForecast.AddDays(6), 10080)], null, null, null, currentForecast));
 Assert(forecastViewModel.Reset.StartsWith("reinicia em ", StringComparison.Ordinal) && !forecastViewModel.Reset.Contains("restante esta semana", StringComparison.OrdinalIgnoreCase), "weekly reset keeps only the reset countdown label");
 Assert(forecastViewModel.IsExhaustionRisk && forecastViewModel.Forecast.StartsWith("Risco de esgotar antes do reset", StringComparison.Ordinal), "view model exposes the early exhaustion risk for conditional UI emphasis");
-forecastViewModel.ApplyQuota(new RateLimitSnapshot([new("codex:primary", "Weekly", 10, nowForecast.AddDays(3), 10080)], null, null, null, nowForecast));
+forecastViewModel.ApplyQuota(new RateLimitSnapshot([new("codex:primary", "Weekly", 10, currentForecast.AddDays(3), 10080)], null, null, null, currentForecast));
 Assert(!forecastViewModel.IsExhaustionRisk, "forecast emphasis clears when quota should last until reset");
 Assert(TokenPresentation.Format(999) == "999", "small token counts remain legible");
 Assert(TokenPresentation.Format(1_000) == "1 mil", "one thousand tokens uses mil");
@@ -463,6 +519,20 @@ var elapsedTimingSparse = new RateLimitSnapshot([new("codex:primary", "Usage lim
 var elapsedTimingWindow = RateLimitParser.Merge(mergeCurrent, elapsedTimingSparse).Windows.Single();
 Assert(elapsedTimingWindow.ResetsAt is null && elapsedTimingWindow.WindowDurationMins is null, "sparse update never inherits an elapsed reset");
 var analyticsRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-analytics-" + Guid.NewGuid());
+var gitResolverRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-git-roots-" + Guid.NewGuid());
+var repoRoot = Path.Combine(gitResolverRoot, "repo-a"); var repoSubdir = Path.Combine(repoRoot, "src", "nested");
+Directory.CreateDirectory(Path.Combine(repoRoot, ".git")); Directory.CreateDirectory(repoSubdir);
+var worktreeRoot = Path.Combine(gitResolverRoot, "worktree"); var worktreeGit = Path.Combine(gitResolverRoot, "metadata", "worktrees", "worktree"); var commonGit = Path.Combine(gitResolverRoot, ".git");
+Directory.CreateDirectory(worktreeRoot); Directory.CreateDirectory(worktreeGit); Directory.CreateDirectory(commonGit);
+File.WriteAllText(Path.Combine(worktreeRoot, ".git"), "gitdir: " + worktreeGit); File.WriteAllText(Path.Combine(worktreeGit, "commondir"), "../../../.git");
+var nonGitRoot = gitResolverRoot + "-plain"; Directory.CreateDirectory(nonGitRoot);
+var invalidGitRoot = gitResolverRoot + "-invalid"; Directory.CreateDirectory(invalidGitRoot); File.WriteAllText(Path.Combine(invalidGitRoot, ".git"), "not a gitdir");
+var invalidCommonRoot = gitResolverRoot + "-invalid-common"; var invalidCommonGit = Path.Combine(gitResolverRoot, "metadata", "worktrees", "invalid-common"); Directory.CreateDirectory(invalidCommonRoot); Directory.CreateDirectory(invalidCommonGit); File.WriteAllText(Path.Combine(invalidCommonRoot, ".git"), "gitdir: " + invalidCommonGit); File.WriteAllText(Path.Combine(invalidCommonGit, "commondir"), "../../missing.git");
+var sameNameA = Path.Combine(gitResolverRoot, "left", "same-name"); var sameNameB = Path.Combine(gitResolverRoot, "right", "same-name"); Directory.CreateDirectory(Path.Combine(sameNameA, ".git")); Directory.CreateDirectory(Path.Combine(sameNameB, ".git"));
+var projectResolver = new ProjectRootResolver();
+Assert(projectResolver.Resolve(repoSubdir) == Path.GetFullPath(repoRoot) && projectResolver.Resolve(worktreeRoot) == Path.GetFullPath(gitResolverRoot) && projectResolver.Resolve(Path.Combine(gitResolverRoot, "missing")) is null && projectResolver.Resolve(nonGitRoot) is null && projectResolver.Resolve(invalidGitRoot) is null && projectResolver.Resolve(invalidCommonRoot) is null && !string.Equals(projectResolver.Resolve(sameNameA), projectResolver.Resolve(sameNameB), StringComparison.OrdinalIgnoreCase), "Git project resolver accepts directory and linked-worktree markers, rejects missing/non-Git/invalid metadata including invalid commondir, and preserves distinct same-basename roots");
+Directory.Delete(gitResolverRoot, true);
+Directory.Delete(nonGitRoot, true); Directory.Delete(invalidGitRoot, true); Directory.Delete(invalidCommonRoot, true);
 Directory.CreateDirectory(analyticsRoot);
 File.WriteAllText(Path.Combine(analyticsRoot, "session.jsonl"), """
 {"timestamp":"2026-08-12T10:00:00Z","payload":{"type":"turn_context","model":"gpt-5.6-terra"}}
@@ -470,7 +540,7 @@ File.WriteAllText(Path.Combine(analyticsRoot, "session.jsonl"), """
 {"timestamp":"2026-08-12T10:01:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":30,"output_tokens":0,"total_tokens":150}}}}
 {"timestamp":"2026-08-12T10:02:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":180,"cached_input_tokens":30,"output_tokens":0,"total_tokens":180}}}}
 malformed
-""");
+""" + Environment.NewLine);
 var analyticsNow = new DateTimeOffset(2026, 8, 12, 12, 0, 0, TimeSpan.Zero);
 var analyticsService = new LocalUsageAnalyticsService(() => analyticsNow);
 var analytics = analyticsService.Read(5.5m, analyticsRoot);
@@ -517,11 +587,116 @@ File.WriteAllText(Path.Combine(componentRoot, "components.jsonl"), """
 {"type":"session_meta","payload":{"session_id":"components","id":"components","thread_source":"root"}}
 {"timestamp":"2026-08-12T10:00:00Z","payload":{"type":"turn_context","model":"gpt-5.6-sol"}}
 {"timestamp":"2026-08-12T10:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10,"reasoning_output_tokens":5,"total_tokens":110}}}}
-""");
-var componentUsage = new LocalUsageAnalyticsService().Read(5.5m, componentRoot);
-Assert(componentUsage.MonthTokens == 115, "processed tokens equal input plus output plus reasoning, independent of legacy total_tokens semantics");
-Assert(componentUsage.MonthUsd == 0.00059m, "reasoning tokens use the output tariff while cached input remains an input subset");
+""" + Environment.NewLine);
+var componentUsage = new LocalUsageAnalyticsService(() => analyticsNow).Read(5.5m, componentRoot);
+Assert(componentUsage.MonthTokens == 110, "processed tokens equal input plus output because reasoning is an output subset");
+Assert(componentUsage.MonthUsd == 0.00044m, "reasoning tokens use the output tariff while cached input and reasoning remain mutually exclusive tooltip categories");
+var componentBreakdown = componentUsage.DailySeries!.Single(day => day.Day.Day == 12).Breakdown!;
+Assert(componentBreakdown.CachedReadTokens == 80 && componentBreakdown.InputTokens == 20 && componentBreakdown.OutputTokens == 5 && componentBreakdown.ReasoningTokens == 5 && componentBreakdown.TotalTokens == 110 && componentBreakdown.TotalCostUsd == componentUsage.MonthUsd, "token breakdown excludes cached read from input and reasoning from output while its categories sum to the displayed total and cost");
 Directory.Delete(componentRoot, true);
+var chatUsageRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-chat-usage-" + Guid.NewGuid());
+Directory.CreateDirectory(chatUsageRoot);
+File.WriteAllText(Path.Combine(chatUsageRoot, "root.jsonl"), """
+{"type":"session_meta","payload":{"session_id":"root-session","id":"root-chat","cwd":"C:\\work\\project-alpha"}}
+{"timestamp":"2026-08-12T10:00:00Z","payload":{"type":"turn_context","model":"gpt-5.6-sol"}}
+{"timestamp":"2026-08-12T10:00:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":10,"reasoning_output_tokens":5}}}}
+""" + Environment.NewLine);
+File.WriteAllText(Path.Combine(chatUsageRoot, "child.jsonl"), """
+{"type":"session_meta","payload":{"session_id":"child-session","id":"child-chat","parent_thread_id":"root-chat","thread_source":"subagent","cwd":"C:\\work\\project-alpha"}}
+{"timestamp":"2026-08-12T10:00:00Z","payload":{"type":"turn_context","model":"unknown-model"}}
+{"timestamp":"2026-08-12T10:00:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":50,"cached_input_tokens":10,"output_tokens":0}}}}
+""" + Environment.NewLine);
+File.WriteAllText(Path.Combine(chatUsageRoot, "same-title.jsonl"), """
+{"type":"session_meta","payload":{"session_id":"other-session","id":"other-chat","cwd":"C:\\work\\project-alpha"}}
+{"timestamp":"2026-08-12T10:00:00Z","payload":{"type":"turn_context","model":"gpt-5.6-terra"}}
+{"timestamp":"2026-08-12T10:00:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":25,"output_tokens":0}}}}
+""" + Environment.NewLine);
+var chatUsage = new LocalUsageAnalyticsService(() => analyticsNow).Read(5.5m, chatUsageRoot);
+var consolidatedChat = chatUsage.Chats!.Single(chat => chat.ThreadId == "root-chat");
+Assert(chatUsage.Chats!.Count == 2 && consolidatedChat.Tokens == 160 && consolidatedChat.Breakdown.TotalTokens == 160 && consolidatedChat.PricedTokens == 110 && consolidatedChat.CostUsd == consolidatedChat.Breakdown.TotalCostUsd, "explicit child usage consolidates once into its root chat while independently rooted chats remain distinct");
+Assert(consolidatedChat.ProjectPath is null && consolidatedChat.Breakdown.CachedReadTokens + consolidatedChat.Breakdown.InputTokens + consolidatedChat.Breakdown.OutputTokens + consolidatedChat.Breakdown.ReasoningTokens == consolidatedChat.Tokens, "monthly chat snapshot rejects an unverifiable cwd while token categories continue to close exactly");
+var chatDetailsViewModel = new MainViewModel();
+var chatDetailsSnapshot = new RateLimitSnapshot([new("codex:primary", "Weekly", 20, analyticsNow.AddDays(4), 10080)], null, null, null, analyticsNow);
+chatDetailsViewModel.Apply(chatDetailsSnapshot, new UsageAnalytics(0, 185, .01m, .055m, 50, [], UsdBrl: 5.5m, Chats:
+[
+    consolidatedChat with { ProjectPath = @"C:\work\project-alpha" },
+    new ChatUsage("missing-cwd", null, "Repeated title", 25, .0001m, 25, new TokenUsageBreakdown(0, 25, 0, 0, 0, .0001m)),
+    new ChatUsage("same-basename-other-root", @"D:\other\project-alpha", "Same basename", 1, .00001m, 1, new TokenUsageBreakdown(0, 1, 0, 0, 0, .00001m)),
+    new ChatUsage("same-casing-root", @"C:\WORK\PROJECT-ALPHA", "Same path casing", 1, .00001m, 1, new TokenUsageBreakdown(0, 1, 0, 0, 0, .00001m))
+]), "BRL");
+Assert(chatDetailsViewModel.ChatProjects.Count == 3 && chatDetailsViewModel.ChatProjects.Count(project => project.Project == "project-alpha") == 2 && chatDetailsViewModel.ChatProjects.All(project => !project.IsExpanded && project.Chats.Count == 0) && chatDetailsViewModel.ChatProjects.All(project => !project.Project.Contains(@"C:\work", StringComparison.OrdinalIgnoreCase) && !project.Project.Contains(@"D:\other", StringComparison.OrdinalIgnoreCase)), "chat details use the complete normalized cwd as a case-insensitive hidden grouping identity, initially collapse every project, and never render local paths");
+var primaryAlpha = chatDetailsViewModel.ChatProjects.First(project => project.Project == "project-alpha");
+primaryAlpha.Toggle();
+var rootChatRow = primaryAlpha.Chats.Single(row => row.Title == LocalizationManager.Text("CodexConversation"));
+Assert(primaryAlpha.Chats.Count == 2 && rootChatRow.EstimateNote == LocalizationManager.Text("PartialTariffEstimate") && rootChatRow.CachedReadFraction == 30d / 160d && rootChatRow.InputFraction == 120d / 160d && rootChatRow.OutputFraction == 5d / 160d && rootChatRow.ReasoningFraction == 5d / 160d && rootChatRow.TotalFraction == 1d, "expanding a project materializes only its chats with exclusive category ratios over the chat total");
+chatDetailsViewModel.ChatSearch = "PROJECT-ALPHA";
+Assert(chatDetailsViewModel.ChatProjects.Count(project => project.IsVisible) == 2 && chatDetailsViewModel.ChatProjects.Where(project => project.IsVisible).All(project => !project.IsExpanded && project.Chats.Count == 0), "case-insensitive project search shows matching groups without autoexpanding or materializing chats");
+chatDetailsViewModel.ChatProjects.First(project => project.IsVisible).Toggle();
+Assert(chatDetailsViewModel.ChatProjects.First(project => project.IsVisible).Chats.Count > 0, "manual expansion after project search materializes only that filtered project's chats");
+chatDetailsViewModel.ChatSearch = "rePeAtEd TiTlE";
+Assert(chatDetailsViewModel.ChatProjects.Count(project => project.IsVisible) == 1 && !chatDetailsViewModel.ChatProjects.Single(project => project.IsVisible).IsExpanded && chatDetailsViewModel.ChatProjects.Single(project => project.IsVisible).Chats.Count == 0, "case-insensitive chat search shows only the matching project while keeping its results lazy");
+chatDetailsViewModel.ChatProjects.Single(project => project.IsVisible).Toggle();
+Assert(chatDetailsViewModel.ChatProjects.Single(project => project.IsVisible).Chats.Single().Title == "Repeated title", "manual expansion after chat search materializes only matching chats");
+chatDetailsViewModel.ChatSearch = "";
+Assert(chatDetailsViewModel.HasVisibleChatProjects && chatDetailsViewModel.ChatProjects.All(project => !project.IsExpanded && project.Chats.Count == 0), "clearing chat search restores collapsed groups, releases materialized chat rows, and restores the visible project list");
+chatDetailsViewModel.ChatSearch = "no matching chat";
+Assert(!chatDetailsViewModel.HasVisibleChatProjects && chatDetailsViewModel.ChatProjects.All(project => !project.IsVisible), "a zero-match chat search exposes the localized empty-state condition instead of an empty list area");
+chatDetailsViewModel.ChatSearch = "";
+primaryAlpha.Toggle();
+chatDetailsViewModel.Apply(chatDetailsSnapshot, new UsageAnalytics(0, 185, .01m, .055m, 50, [], UsdBrl: 5.5m, Chats:
+[
+    consolidatedChat,
+    new ChatUsage("missing-cwd", null, "Repeated title", 25, .0001m, 25, new TokenUsageBreakdown(0, 25, 0, 0, 0, .0001m)),
+    new ChatUsage("same-basename-other-root", @"D:\other\project-alpha", "Same basename", 1, .00001m, 1, new TokenUsageBreakdown(0, 1, 0, 0, 0, .00001m)),
+    new ChatUsage("same-casing-root", @"C:\WORK\PROJECT-ALPHA", "Same path casing", 1, .00001m, 1, new TokenUsageBreakdown(0, 1, 0, 0, 0, .00001m))
+]), "BRL");
+Assert(chatDetailsViewModel.ChatProjects.First(project => project.Key.Equals(primaryAlpha.Key, StringComparison.OrdinalIgnoreCase)).IsExpanded, "analytics refresh preserves a manually expanded project by its hidden normalized project key");
+chatDetailsViewModel.ChatSearch = "repeated title";
+chatDetailsViewModel.Apply(chatDetailsSnapshot, new UsageAnalytics(0, 25, .0001m, .00055m, 100, [], UsdBrl: 5.5m, Chats:
+[
+    new ChatUsage("missing-cwd", null, "Repeated title", 25, .0001m, 25, new TokenUsageBreakdown(0, 25, 0, 0, 0, .0001m))
+]), "BRL");
+Assert(chatDetailsViewModel.HasVisibleChatProjects && !chatDetailsViewModel.ChatProjects.Single().IsExpanded && chatDetailsViewModel.ChatProjects.Single().Chats.Count == 0, "an active search remains applied without autoexpanding or materializing projects after analytics refresh");
+chatDetailsViewModel.ChatProjects.Single().Toggle();
+Assert(chatDetailsViewModel.ChatProjects.Single().Chats.Single().Title == "Repeated title", "manual expansion after refresh still materializes the active search match");
+chatDetailsViewModel.ResetChatDetailsView();
+Assert(chatDetailsViewModel.ChatSearch == "" && chatDetailsViewModel.HasVisibleChatProjects && chatDetailsViewModel.ChatProjects.All(project => project.IsVisible && !project.IsExpanded && project.Chats.Count == 0), "resetting the chat-details view clears search and restores all projects to their collapsed lazy initial state");
+var zeroChatViewModel = new MainViewModel();
+zeroChatViewModel.Apply(chatDetailsSnapshot, new UsageAnalytics(0, 0, 0, 0, 0, [], UsdBrl: 5.5m, Chats:
+[
+    new ChatUsage("zero", null, "Zero", 0, 0, 0, TokenUsageBreakdown.Zero)
+]), "BRL");
+var zeroProject = zeroChatViewModel.ChatProjects.Single(); zeroProject.Toggle();
+Assert(zeroProject.Chats.Single().CachedReadFraction == 0 && zeroProject.Chats.Single().InputFraction == 0 && zeroProject.Chats.Single().OutputFraction == 0 && zeroProject.Chats.Single().ReasoningFraction == 0 && zeroProject.Chats.Single().TotalFraction == 0, "zero-token chat ratios remain finite and the total bar is zero when there is no total");
+var titleOnlyDatabase = Path.Combine(chatUsageRoot, "title-only.sqlite");
+using (var connection = new SqliteConnection("Data Source=" + titleOnlyDatabase))
+{
+    connection.Open();
+    using var command = connection.CreateCommand();
+    command.CommandText = "CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT); INSERT INTO threads (id, title) VALUES ('root-chat', 'Legacy title');";
+    command.ExecuteNonQuery();
+}
+Assert(new LocalUsageAnalyticsService(() => analyticsNow, stateDatabasePath: titleOnlyDatabase).Read(5.5m, chatUsageRoot).Chats!.Single(chat => chat.ThreadId == "root-chat").Title == "Legacy title", "read-only title index supports a legacy title-only threads schema");
+var nameAndTitleDatabase = Path.Combine(chatUsageRoot, "name-and-title.sqlite");
+using (var connection = new SqliteConnection("Data Source=" + nameAndTitleDatabase))
+{
+    connection.Open();
+    using var command = connection.CreateCommand();
+    command.CommandText = "CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, title TEXT); INSERT INTO threads (id, name, title) VALUES ('root-chat', 'Preferred name', 'Legacy title');";
+    command.ExecuteNonQuery();
+}
+Assert(new LocalUsageAnalyticsService(() => analyticsNow, stateDatabasePath: nameAndTitleDatabase).Read(5.5m, chatUsageRoot).Chats!.Single(chat => chat.ThreadId == "root-chat").Title == "Preferred name", "read-only title index prefers the current name when both title columns exist");
+var whitespaceNameDatabase = Path.Combine(chatUsageRoot, "whitespace-name.sqlite");
+using (var connection = new SqliteConnection("Data Source=" + whitespaceNameDatabase))
+{
+    connection.Open();
+    using var command = connection.CreateCommand();
+    command.CommandText = "CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, title TEXT); INSERT INTO threads (id, name, title) VALUES ('root-chat', '   ', 'Whitespace fallback title');";
+    command.ExecuteNonQuery();
+}
+Assert(new LocalUsageAnalyticsService(() => analyticsNow, stateDatabasePath: whitespaceNameDatabase).Read(5.5m, chatUsageRoot).Chats!.Single(chat => chat.ThreadId == "root-chat").Title == "Whitespace fallback title", "title index accepts a non-empty legacy title when the current name is whitespace");
+SqliteConnection.ClearAllPools();
+Directory.Delete(chatUsageRoot, true);
 File.AppendAllText(Path.Combine(analyticsRoot, "session.jsonl"), "\n");
 var cachedAnalytics = new LocalUsageAnalyticsService();
 _ = cachedAnalytics.Read(5.5m, analyticsRoot);
@@ -764,7 +939,7 @@ Directory.CreateDirectory(activityRoot);
 var activityNow = new DateTimeOffset(2026, 8, 14, 13, 30, 0, TimeSpan.Zero);
 var rootActivityPath = Path.Combine(activityRoot, "root.jsonl");
 File.WriteAllText(rootActivityPath, """
-{"timestamp":"2026-08-14T13:20:00Z","type":"session_meta","payload":{"session_id":"root-1","id":"root-1","thread_source":"user"}}
+{"timestamp":"2026-08-14T13:20:00Z","type":"session_meta","payload":{"session_id":"root-1","id":"root-1","thread_source":"user","cwd":"D:\\Dev\\codex-tracker"}}
 {"timestamp":"2026-08-14T13:20:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-root"}}
 {"timestamp":"2026-08-14T13:20:02Z","type":"turn_context","payload":{"turn_id":"turn-root","model":"gpt-5.6-terra","effort":"medium"}}
 {"timestamp":"2026-08-14T13:29:45Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"  **Validando o build e os testes\ncom atencao aos detalhes"}}
@@ -819,9 +994,9 @@ var activeAgents = activityService.Read(new Dictionary<string, string> { ["root-
 Assert(activeAgents.Count == 7, "active task markers expose roots, descendants, orphans and cycles exactly once");
 Assert(activeAgents.Select(agent => agent.ThreadId).SequenceEqual(["root-1", "sub-1", "grand-1", "root-b", "orphan", "cycle-a", "cycle-b"]), "active agents are depth-first by stable roots and descendants, with cycle fallback order");
 var activeRoot = activeAgents.Single(x => x.ThreadId == "root-1");
-Assert(activeRoot.Type == "Agent" && activeRoot.HierarchyDepth == 0 && activeRoot.Title == "Indicador de agentes" && activeRoot.Status == "Validando o build e os testes" && activeRoot.Model == "gpt-5.6-terra" && activeRoot.Effort == "medium", "principal activity preserves title, active reasoning, model and effort even after later commentary");
+Assert(activeRoot.Type == "Agent" && activeRoot.HierarchyDepth == 0 && activeRoot.Title == "Indicador de agentes" && activeRoot.Status == "Validando o build e os testes" && activeRoot.Model == "gpt-5.6-terra" && activeRoot.Effort == "medium" && activeRoot.ProjectPath == @"D:\Dev\codex-tracker", "principal activity preserves title, active reasoning, model, effort and session project even after later commentary");
 var activeSubagent = activeAgents.Single(x => x.ThreadId == "sub-1");
-Assert(activeSubagent.Type == "Subagent" && activeSubagent.HierarchyDepth == 1 && activeSubagent.Title == "ui review" && activeSubagent.ParentThreadId == "root-1" && activeSubagent.Model == "gpt-5.6-luna" && activeSubagent.Effort == "low", "subagent activity uses its own id, depth and safe path fallback title");
+Assert(activeSubagent.Type == "Subagent" && activeSubagent.HierarchyDepth == 1 && activeSubagent.Title == "ui review" && activeSubagent.ParentThreadId == "root-1" && activeSubagent.Model == "gpt-5.6-luna" && activeSubagent.Effort == "low" && activeSubagent.ProjectPath == @"D:\Dev\codex-tracker", "subagent activity uses its own id, depth, inherited parent project and safe path fallback title");
 Assert(activeAgents.Single(x => x.ThreadId == "grand-1").HierarchyDepth == 2 && activeAgents.Single(x => x.ThreadId == "root-b").HierarchyDepth == 0 && activeAgents.Single(x => x.ThreadId == "orphan").HierarchyDepth == 0, "grandchildren nest while roots with missing parents remain visual roots");
 Assert(activeAgents.Single(x => x.ThreadId == "root-b").Model == "unknown" && activeAgents.Single(x => x.ThreadId == "root-b").Effort == "unknown", "missing turn context initially uses unknown metadata");
 File.AppendAllText(rootBActivityPath, "\n{\"timestamp\":\"2026-08-14T13:29:57Z\",\"payload\":{\"type\":\"turn_context\",\"model\":\"gpt-5.6-sol\",\"effort\":\"high\"}}\n");
@@ -873,7 +1048,7 @@ File.SetLastWriteTimeUtc(rootActivityPath, activityNow.UtcDateTime.AddSeconds(2)
 Assert(activityService.Read(null, activityRoot).All(x => x.ThreadId != "root-1"), "matching task_complete removes the principal from the running list after a partial append completes");
 var completedSnapshot = activityService.ReadSnapshot(new Dictionary<string, string> { ["root-1"] = "Indicador de agentes" }, activityRoot);
 var completedRoot = completedSnapshot.CompletedAgentWorks.Single(work => work.ThreadId == "root-1");
-Assert(completedRoot.CompletionId == "root-1:turn-root" && completedRoot.Title == "Indicador de agentes" && completedRoot.Status == "Concluído" && completedRoot.CompletedAt == new DateTimeOffset(2026, 8, 14, 13, 29, 58, TimeSpan.Zero), "principal task completion remains addressable with its title and exact turn identity for unread tracking");
+Assert(completedRoot.CompletionId == "root-1:turn-root" && completedRoot.Title == "Indicador de agentes" && completedRoot.Status == "Concluído" && completedRoot.CompletedAt == new DateTimeOffset(2026, 8, 14, 13, 29, 58, TimeSpan.Zero) && completedRoot.ProjectPath == @"D:\Dev\codex-tracker", "principal task completion remains addressable with its title, project and exact turn identity for unread tracking");
 File.AppendAllText(subagentActivityPath, "\n{\"timestamp\":\"2026-08-14T13:29:59Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"turn-sub\"}}\n");
 File.SetLastWriteTimeUtc(subagentActivityPath, activityNow.UtcDateTime.AddSeconds(3));
 Assert(activityService.ReadSnapshot(null, activityRoot).CompletedAgentWorks.All(work => work.ThreadId != "sub-1"), "subagent completions never enter the unread principal-work list");

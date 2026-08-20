@@ -2,19 +2,23 @@ using System.Collections;
 using System.Globalization;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Input;
+using System.Windows.Controls.Primitives;
 using CodexTracker.Core;
 using MediaBrush = System.Windows.Media.Brush;
 using MediaBrushes = System.Windows.Media.Brushes;
 using MediaPen = System.Windows.Media.Pen;
 using WpfPoint = System.Windows.Point;
+using WpfToolTip = System.Windows.Controls.ToolTip;
 
 namespace CodexTracker;
 
 public sealed class DailyUsageChart : FrameworkElement
 {
     private readonly List<BarHit> _barHits = [];
+    private readonly WpfToolTip _tooltip = new() { Placement = PlacementMode.Mouse, StaysOpen = true };
     private int _hoveredIndex = -1;
 
     public static readonly DependencyProperty SeriesProperty = DependencyProperty.Register(
@@ -50,8 +54,10 @@ public sealed class DailyUsageChart : FrameworkElement
     public DailyUsageChart()
     {
         IsHitTestVisible = true;
+        _tooltip.SetResourceReference(StyleProperty, "TokenUsageToolTip");
+        ToolTip = _tooltip;
         MouseMove += OnMouseMove;
-        MouseLeave += (_, _) => { _hoveredIndex = -1; InvalidateVisual(); };
+        MouseLeave += (_, _) => { _hoveredIndex = -1; _tooltip.IsOpen = false; InvalidateVisual(); };
     }
 
     protected override void OnRender(DrawingContext drawingContext)
@@ -85,8 +91,6 @@ public sealed class DailyUsageChart : FrameworkElement
         var last = days.ToString(CultureInfo.InvariantCulture);
         var formatted = CreateText(last, typeface);
         drawingContext.DrawText(formatted, new WpfPoint(Math.Max(0, ActualWidth - formatted.Width), chartHeight + 2));
-        if (_hoveredIndex >= 0 && _hoveredIndex < _barHits.Count)
-            DrawTooltip(drawingContext, _barHits[_hoveredIndex], typeface);
     }
 
     protected override HitTestResult? HitTestCore(PointHitTestParameters hitTestParameters) =>
@@ -100,7 +104,7 @@ public sealed class DailyUsageChart : FrameworkElement
         foreach (var item in Series)
         {
             if (item is null) { result.Add(DailyPoint.Zero(fallbackDay++)); continue; }
-            if (TryNumber(item, out var direct)) { result.Add(new(fallbackDay++, Math.Max(0, direct), 0, 0)); continue; }
+            if (TryNumber(item, out var direct)) { result.Add(new(fallbackDay++, Math.Max(0, direct), 0, 0, TokenUsageBreakdown.Zero)); continue; }
             var type = item.GetType();
             var dayValue = type.GetProperty("Day")?.GetValue(item);
             var day = dayValue is DateTime date ? date.Day : fallbackDay;
@@ -108,7 +112,8 @@ public sealed class DailyUsageChart : FrameworkElement
             _ = TryNumber(tokenProperty?.GetValue(item), out var tokens);
             _ = TryDecimal(type.GetProperty("UsdCost")?.GetValue(item), out var usd);
             _ = TryDecimal(type.GetProperty("BrlCost")?.GetValue(item), out var brl);
-            result.Add(new(day, Math.Max(0, tokens), Math.Max(0, usd), Math.Max(0, brl)));
+            var breakdown = type.GetProperty("Breakdown")?.GetValue(item) as TokenUsageBreakdown ?? TokenUsageBreakdown.Zero;
+            result.Add(new(day, Math.Max(0, tokens), Math.Max(0, usd), Math.Max(0, brl), breakdown));
             fallbackDay++;
         }
         return result;
@@ -120,23 +125,16 @@ public sealed class DailyUsageChart : FrameworkElement
         var next = _barHits.FindIndex(hit => hit.Bounds.Contains(position));
         if (next == _hoveredIndex) return;
         _hoveredIndex = next;
+        if (next >= 0) ShowTooltip(_barHits[next]);
+        else _tooltip.IsOpen = false;
         InvalidateVisual();
     }
 
-    private void DrawTooltip(DrawingContext context, BarHit hit, Typeface typeface)
+    private void ShowTooltip(BarHit hit)
     {
-        var tokenText = TokenPresentation.Format((long)Math.Round(hit.Point.Tokens), LocalizationManager.CurrentLanguageCode);
-        var costText = CurrencyPresentation.FormatCost(hit.Point.UsdCost, hit.Point.BrlCost, CurrencyCode, LocalizationManager.CurrentLanguageCode);
-        var lines = new[] { LocalizationManager.Format("DayNumber", hit.Point.Day), tokenText, costText };
-        var formatted = lines.Select(line => CreateTooltipText(line, typeface)).ToArray();
-        var boxWidth = Math.Max(68, formatted.Max(line => line.Width) + 14);
-        var boxHeight = 49d;
-        var x = Net48Compatibility.Clamp(hit.Bounds.X + hit.Bounds.Width / 2 - boxWidth / 2, 0, Math.Max(0, ActualWidth - boxWidth));
-        var y = 2d;
-        var box = new Rect(x, y, boxWidth, boxHeight);
-        context.DrawRoundedRectangle(TooltipSurface, null, box, 6, 6);
-        for (var index = 0; index < formatted.Length; index++)
-            context.DrawText(formatted[index], new WpfPoint(x + 7, y + 5 + index * 14));
+        var exchangeRate = hit.Point.UsdCost > 0 ? hit.Point.BrlCost / hit.Point.UsdCost : 0;
+        _tooltip.Content = TokenUsageTooltip.Create(LocalizationManager.Format("DayNumber", hit.Point.Day), hit.Point.Breakdown, true, exchangeRate, CurrencyCode);
+        _tooltip.IsOpen = true;
     }
 
     private static bool TryNumber(object? value, out double number)
@@ -157,12 +155,9 @@ public sealed class DailyUsageChart : FrameworkElement
     private FormattedText CreateText(string text, Typeface typeface) => new(
         text, CultureInfo.CurrentUICulture, System.Windows.FlowDirection.LeftToRight, typeface, 8, LabelBrush, VisualTreeHelper.GetDpi(this).PixelsPerDip);
 
-    private FormattedText CreateTooltipText(string text, Typeface typeface) => new(
-        text, CultureInfo.CurrentUICulture, System.Windows.FlowDirection.LeftToRight, typeface, 9, TooltipTextBrush, VisualTreeHelper.GetDpi(this).PixelsPerDip);
-
-    private sealed record DailyPoint(int Day, double Tokens, decimal UsdCost, decimal BrlCost)
+    private sealed record DailyPoint(int Day, double Tokens, decimal UsdCost, decimal BrlCost, TokenUsageBreakdown Breakdown)
     {
-        public static DailyPoint Zero(int day) => new(day, 0, 0, 0);
+        public static DailyPoint Zero(int day) => new(day, 0, 0, 0, TokenUsageBreakdown.Zero);
     }
     private sealed record BarHit(Rect Bounds, DailyPoint Point);
 }

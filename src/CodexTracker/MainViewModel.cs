@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows;
@@ -7,7 +8,39 @@ using CodexTracker.Core;
 
 namespace CodexTracker;
 
-public sealed record RankingRow(string Model, string Tokens, double Fraction, bool Priced, string SecondaryText);
+public sealed record RankingRow(string Model, string Tokens, double Fraction, bool Priced, string SecondaryText, string Tooltip, TokenUsageTooltip TooltipData);
+public sealed record ChatDetailsRow(string Title, string CachedReadTokens, string CachedReadCost, string InputTokens, string InputCost, string OutputTokens, string OutputCost, string ReasoningTokens, string ReasoningCost, string TotalTokens, string TotalCost, string EstimateNote, double CachedReadFraction, double InputFraction, double OutputFraction, double ReasoningFraction, double TotalFraction);
+public sealed class ChatDetailsProjectRow : INotifyPropertyChanged
+{
+    private readonly IReadOnlyList<ChatDetailsRow> _allChats;
+    private bool _isExpanded, _isVisible = true;
+    public event PropertyChangedEventHandler? PropertyChanged;
+    public string Project { get; }
+    public string Key { get; }
+    public ObservableCollection<ChatDetailsRow> Chats { get; } = [];
+    public bool IsExpanded { get => _isExpanded; private set { if (_isExpanded == value) return; _isExpanded = value; PropertyChanged?.Invoke(this, new(nameof(IsExpanded))); RefreshMaterialized(); } }
+    public bool IsVisible { get => _isVisible; private set { if (_isVisible == value) return; _isVisible = value; PropertyChanged?.Invoke(this, new(nameof(IsVisible))); } }
+    private IReadOnlyList<ChatDetailsRow> _filteredChats = [];
+    public ChatDetailsProjectRow(string key, string project, IReadOnlyList<ChatDetailsRow> chats) { Key = key; Project = project; _allChats = chats; _filteredChats = chats; }
+    public void Toggle() => IsExpanded = !IsExpanded;
+    public void SetExpanded(bool value) => IsExpanded = value;
+    public void ApplySearch(string? query)
+    {
+        var search = query?.Trim() ?? "";
+        var projectMatch = Project.IndexOf(search, StringComparison.CurrentCultureIgnoreCase) >= 0;
+        _filteredChats = string.IsNullOrWhiteSpace(search) ? _allChats : projectMatch ? _allChats : _allChats.Where(chat => chat.Title.IndexOf(search, StringComparison.CurrentCultureIgnoreCase) >= 0).ToArray();
+        IsVisible = _filteredChats.Count > 0;
+        IsExpanded = false;
+        Chats.Clear();
+        RefreshMaterialized();
+    }
+    private void RefreshMaterialized()
+    {
+        Chats.Clear();
+        if (!IsExpanded || !IsVisible) return;
+        foreach (var chat in _filteredChats) Chats.Add(chat);
+    }
+}
 public sealed class AgentActivityRow : INotifyPropertyChanged
 {
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -15,8 +48,8 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
     private int _hierarchyDepth;
     private Thickness _indent;
     private string _sourceType = "", _sourceTitle = "", _sourceStatus = "";
-    private string _type = "", _title = "", _status = "", _modelAndEffort = "", _elapsed = "";
-    private bool _isWorkAnimationEnabled, _isNew, _isCompleted;
+    private string _type = "", _title = "", _status = "", _modelAndEffort = "", _elapsed = "", _projectKey = "", _projectName = "Sem projeto";
+    private bool _isWorkAnimationEnabled, _isNew, _isCompleted, _showsProjectSeparator;
     public AgentActivityRow(ActiveAgent agent, DateTimeOffset now, bool isNew)
     {
         ThreadId = agent.ThreadId;
@@ -41,6 +74,7 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
         RefreshLocalization();
         Set(ref _modelAndEffort, $"{work.Model} · {work.Effort}", nameof(ModelAndEffort));
         Set(ref _elapsed, FormatElapsed(work.CompletedAt - work.StartedAt), nameof(Elapsed));
+        SetProject(work.ProjectPath);
     }
 
     public string ThreadId { get; }
@@ -56,6 +90,9 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
     public bool IsWorkAnimationEnabled => _isWorkAnimationEnabled;
     public bool IsNew => _isNew;
     public bool IsCompleted => _isCompleted;
+    public string ProjectKey => _projectKey;
+    public string ProjectName => _projectName;
+    public bool ShowsProjectSeparator => _showsProjectSeparator;
 
     public void Update(ActiveAgent agent, DateTimeOffset now)
     {
@@ -71,9 +108,11 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
         Set(ref _elapsed, FormatElapsed(now - agent.StartedAt), nameof(Elapsed));
         Set(ref _isWorkAnimationEnabled, SystemParameters.ClientAreaAnimation, nameof(IsWorkAnimationEnabled));
         Set(ref _isCompleted, false, nameof(IsCompleted));
+        SetProject(agent.ProjectPath);
     }
 
     public void MarkStable() => Set(ref _isNew, false, nameof(IsNew));
+    public void SetProjectSeparator(bool value) => Set(ref _showsProjectSeparator, value, nameof(ShowsProjectSeparator));
     public void RefreshLocalization()
     {
         Set(ref _type, LocalizationManager.TranslateKnown(_sourceType), nameof(Type));
@@ -85,6 +124,20 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
     {
         if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
         return elapsed.TotalHours >= 1 ? $"{(int)elapsed.TotalHours}h {elapsed.Minutes:00}m" : $"{elapsed.Minutes}m {elapsed.Seconds:00}s";
+    }
+
+    private void SetProject(string? projectPath)
+    {
+        var normalized = string.IsNullOrWhiteSpace(projectPath) ? "" : projectPath!.Trim().TrimEnd('\\', '/');
+        var label = "Sem projeto";
+        if (!string.IsNullOrWhiteSpace(normalized))
+        {
+            var separator = normalized.LastIndexOfAny(['\\', '/']);
+            label = separator >= 0 ? normalized.Substring(separator + 1) : normalized;
+            if (string.IsNullOrWhiteSpace(label)) label = "Sem projeto";
+        }
+        Set(ref _projectKey, normalized, nameof(ProjectKey));
+        Set(ref _projectName, label, nameof(ProjectName));
     }
 }
 
@@ -109,10 +162,31 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private (DateTimeOffset Start, DateTimeOffset End)? _activeQuotaCycle;
     private RankingPeriod _rankingPeriod = RankingPeriod.Month;
     private bool _hasAnalytics;
+    private bool _hasVisibleChatProjects;
+    private string _chatSearch = "";
     private IReadOnlyList<AgentActivityRow> _completedAgentRows = [];
     public ObservableCollection<RankingRow> Ranking { get; } = [];
     public ObservableCollection<AgentActivityRow> ActiveAgents { get; } = [];
     public ObservableCollection<AgentActivityRow> AgentItems { get; } = [];
+    public ObservableCollection<ChatDetailsProjectRow> ChatProjects { get; } = [];
+    public bool HasVisibleChatProjects { get => _hasVisibleChatProjects; private set => Set(ref _hasVisibleChatProjects, value); }
+    public string ChatSearch
+    {
+        get => _chatSearch;
+        set
+        {
+            if (EqualityComparer<string>.Default.Equals(_chatSearch, value)) return;
+            Set(ref _chatSearch, value);
+            foreach (var project in ChatProjects) project.ApplySearch(value);
+            UpdateVisibleChatProjects();
+        }
+    }
+    public void ResetChatDetailsView()
+    {
+        if (!string.IsNullOrEmpty(_chatSearch)) Set(ref _chatSearch, "", nameof(ChatSearch));
+        foreach (var project in ChatProjects) project.ApplySearch("");
+        UpdateVisibleChatProjects();
+    }
     public string AppVersion { get; } = $"v{Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0"}";
     public string Weekly { get => _weekly; set => Set(ref _weekly, value); }
     public string WeeklyTokens { get => _weeklyTokens; private set => Set(ref _weeklyTokens, value); }
@@ -244,7 +318,20 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void RefreshAgentItems()
     {
-        var source = ActiveAgents.Concat(_completedAgentRows).ToArray();
+        var source = ActiveAgents
+            .Concat(_completedAgentRows)
+            .GroupBy(row => row.ProjectKey, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.First().ProjectName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .SelectMany(group => group.OrderBy(row => row.IsCompleted ? 1 : 0))
+            .ToArray();
+        var previousProjectKey = (string?)null;
+        foreach (var row in source)
+        {
+            var startsProject = !string.Equals(previousProjectKey, row.ProjectKey, StringComparison.OrdinalIgnoreCase);
+            row.SetProjectSeparator(startsProject);
+            previousProjectKey = row.ProjectKey;
+        }
         for (var index = 0; index < source.Length; index++)
         {
             if (index < AgentItems.Count && ReferenceEquals(AgentItems[index], source[index])) continue;
@@ -294,6 +381,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new(nameof(DailyTokenSeries)));
         _lastWeeklyEstimate = analytics.EstimateInWeeklyWindow(weekly);
         _lastAnalytics = analytics;
+        RefreshChatDetails();
         WeeklyTokenCount = _lastWeeklyEstimate?.Tokens;
         WeeklyTokens = WeeklyTokenCount is { } weeklyTokens ? TokenPresentation.Format(weeklyTokens, LocalizationManager.CurrentLanguageCode) : "--";
         _lastTodayUsd = analytics.TodayUsd; _lastTodayBrl = analytics.TodayBrl;
@@ -337,9 +425,68 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var displayModel = string.Equals(item.Model, "unknown", StringComparison.Ordinal)
                 ? LocalizationManager.Text("UnregisteredModel")
                 : item.Model;
-            Ranking.Add(new(displayModel, TokenPresentation.Format(item.Tokens, LocalizationManager.CurrentLanguageCode), item.Tokens / (double)max, item.Priced, secondaryText));
+            var tooltipData = TokenUsageTooltip.Create(displayModel, item.Breakdown ?? TokenUsageBreakdown.Zero, item.Priced, _lastAnalytics.UsdBrl, CurrencyCode);
+            Ranking.Add(new(displayModel, TokenPresentation.Format(item.Tokens, LocalizationManager.CurrentLanguageCode), item.Tokens / (double)max, item.Priced, secondaryText,
+                tooltipData.ToPlainText(), tooltipData));
         }
     }
+
+    private void RefreshChatDetails()
+    {
+        var expandedKeys = string.IsNullOrWhiteSpace(ChatSearch)
+            ? ChatProjects.Where(project => project.IsExpanded).Select(project => project.Key).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        ChatProjects.Clear();
+        if (_lastAnalytics?.Chats is not { } chats) { UpdateVisibleChatProjects(); return; }
+        foreach (var project in chats
+            .GroupBy(chat => ProjectKey(chat.ProjectPath), StringComparer.OrdinalIgnoreCase)
+            .Select(group => new { Key = group.Key, Name = DisplayProject(group.First().ProjectPath), Chats = group })
+            .OrderBy(group => group.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var rows = project.Chats.OrderByDescending(chat => chat.Tokens).Select(FormatChat).ToArray();
+            var projectRow = new ChatDetailsProjectRow(project.Key, project.Name, rows);
+            if (string.IsNullOrWhiteSpace(ChatSearch) && expandedKeys.Contains(project.Key)) projectRow.SetExpanded(true);
+            else projectRow.ApplySearch(ChatSearch);
+            ChatProjects.Add(projectRow);
+        }
+        UpdateVisibleChatProjects();
+    }
+
+    private ChatDetailsRow FormatChat(ChatUsage chat)
+    {
+        var breakdown = chat.Breakdown;
+        var complete = chat.Tokens > 0 && chat.PricedTokens == chat.Tokens;
+        var hasKnown = chat.PricedTokens > 0;
+        string Cost(decimal cost) => hasKnown ? CurrencyPresentation.FormatCost(cost, cost * (_lastAnalytics?.UsdBrl ?? 0), CurrencyCode, LocalizationManager.CurrentLanguageCode) : LocalizationManager.Text("NoTariff");
+        var note = complete ? "" : hasKnown ? LocalizationManager.Text("PartialTariffEstimate") : LocalizationManager.Text("NoTariff");
+        return new ChatDetailsRow(
+            string.IsNullOrWhiteSpace(chat.Title) ? LocalizationManager.Text("CodexConversation") : chat.Title!,
+            TokenPresentation.Format(breakdown.CachedReadTokens, LocalizationManager.CurrentLanguageCode), Cost(breakdown.CachedReadCostUsd),
+            TokenPresentation.Format(breakdown.InputTokens, LocalizationManager.CurrentLanguageCode), Cost(breakdown.InputCostUsd),
+            TokenPresentation.Format(breakdown.OutputTokens, LocalizationManager.CurrentLanguageCode), Cost(breakdown.OutputCostUsd),
+            TokenPresentation.Format(breakdown.ReasoningTokens, LocalizationManager.CurrentLanguageCode), Cost(breakdown.ReasoningCostUsd),
+            TokenPresentation.Format(breakdown.TotalTokens, LocalizationManager.CurrentLanguageCode), Cost(breakdown.TotalCostUsd), note,
+            Fraction(breakdown.CachedReadTokens, breakdown.TotalTokens), Fraction(breakdown.InputTokens, breakdown.TotalTokens),
+            Fraction(breakdown.OutputTokens, breakdown.TotalTokens), Fraction(breakdown.ReasoningTokens, breakdown.TotalTokens), Fraction(breakdown.TotalTokens, breakdown.TotalTokens));
+    }
+
+    private void UpdateVisibleChatProjects() => HasVisibleChatProjects = ChatProjects.Any(project => project.IsVisible);
+
+    private static double Fraction(long value, long total) => total <= 0 ? 0 : Math.Min(1, Math.Max(0, value / (double)total));
+
+    private static string DisplayProject(string? projectPath)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath)) return LocalizationManager.Text("UnknownProject");
+        var trimmed = projectPath!.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var name = Path.GetFileName(trimmed);
+        return string.IsNullOrWhiteSpace(name) ? LocalizationManager.Text("UnknownProject") : name;
+    }
+
+    private static string ProjectKey(string? projectPath) => string.IsNullOrWhiteSpace(projectPath)
+        ? ""
+        : projectPath!.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
     private void ApplyForecast(WeeklyForecast forecast)
     {
         _lastForecast = forecast;
@@ -384,6 +531,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         foreach (var row in AgentItems.Where(row => row.IsCompleted)) row.RefreshLocalization();
         PropertyChanged?.Invoke(this, new(nameof(AgentIndicatorTooltip)));
         RefreshRanking();
+        RefreshChatDetails();
         RefreshFormattedCosts();
     }
     private void Set<T>(ref T field, T value, [CallerMemberName] string name = "") { if (!EqualityComparer<T>.Default.Equals(field, value)) { field = value; PropertyChanged?.Invoke(this, new(name)); } }

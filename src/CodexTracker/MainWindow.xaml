@@ -118,7 +118,13 @@
                     <ItemsControl ItemsSource="{Binding AgentItems}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <Button x:Name="AgentRow" Margin="0" Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                      <StackPanel>
+                        <Grid Margin="15,10,15,1" Visibility="{Binding ShowsProjectSeparator, Converter={StaticResource BooleanToVisibility}}">
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                          <TextBlock Text="{Binding ProjectName}" FontSize="9.2" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" Opacity=".62" TextTrimming="CharacterEllipsis" MaxWidth="154" />
+                          <Border Grid.Column="1" Height="1" Background="{DynamicResource InputSurface}" Opacity=".65" VerticalAlignment="Center" Margin="8,0,0,0" />
+                        </Grid>
+                        <Button x:Name="AgentRow" Margin="0" Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
                               MouseEnter="AgentRowMouseEnter" MouseLeave="AgentRowMouseLeave" PreviewMouseLeftButtonDown="AgentRowPreviewMouseLeftButtonDown"
                               Click="OpenAgentThread" CommandParameter="{Binding ThreadId}" ToolTip="{DynamicResource Loc.OpenAgentChat}" AutomationProperties.Name="{DynamicResource Loc.OpenAgentChat}">
                         <Button.Template>
@@ -169,7 +175,8 @@
                             </Grid>
                           </Grid>
                         </Border>
-                      </Button>
+                        </Button>
+                      </StackPanel>
                       <DataTemplate.Triggers>
                         <DataTrigger Binding="{Binding IsNew}" Value="True">
                           <DataTrigger.EnterActions>
@@ -293,7 +300,7 @@
               </Grid>
             </Grid>
             <ItemsControl ItemsSource="{Binding Ranking}" Margin="0,0,0,0">
-              <ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,3"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="72" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Model}" FontSize="11" Foreground="{DynamicResource Ink}" TextTrimming="CharacterEllipsis" /><StackPanel Grid.Column="1" HorizontalAlignment="Right"><TextBlock Text="{Binding Tokens}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" Foreground="{DynamicResource Ink}" HorizontalAlignment="Right" /><TextBlock Text="{Binding SecondaryText}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="8" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Right" /></StackPanel></Grid><ProgressBar Value="{Binding Fraction}" Maximum="1" Height="4" Background="{DynamicResource Sage}" Foreground="{DynamicResource Accent}" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
+              <ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,3" ToolTipService.InitialShowDelay="0" ToolTipService.BetweenShowDelay="0"><StackPanel.ToolTip><ToolTip Content="{Binding TooltipData}" Style="{StaticResource TokenUsageToolTip}" /></StackPanel.ToolTip><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="72" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Model}" FontSize="11" Foreground="{DynamicResource Ink}" TextTrimming="CharacterEllipsis" /><StackPanel Grid.Column="1" HorizontalAlignment="Right"><TextBlock Text="{Binding Tokens}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" Foreground="{DynamicResource Ink}" HorizontalAlignment="Right" /><TextBlock Text="{Binding SecondaryText}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="8" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Right" /></StackPanel></Grid><ProgressBar Value="{Binding Fraction}" Maximum="1" Height="4" Background="{DynamicResource Sage}" Foreground="{DynamicResource Accent}" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
             </ItemsControl>
             <StackPanel Margin="0,13,0,0">
               <TextBlock Text="{DynamicResource Loc.DailyUsageCurrentMonth}" FontSize="9" Foreground="{DynamicResource SoftInk}" Margin="0,0,0,5" />
@@ -302,6 +309,8 @@
                                      BarBrush="{DynamicResource Accent}" TrackBrush="{DynamicResource GaugeTrack}"
                                      LabelBrush="{DynamicResource SoftInk}" TooltipSurface="{DynamicResource InputSurface}"
                                      TooltipTextBrush="{DynamicResource Ink}" />
+              <Button Click="OpenChatDetails" Content="{DynamicResource Loc.DetailsByChat}" HorizontalAlignment="Left" Padding="8,4" Margin="0,7,0,0"
+                      FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" Background="{DynamicResource InputSurface}" />
             </StackPanel>
             <TextBlock Text="{Binding Status}" FontSize="9" Foreground="{DynamicResource Accent}" Margin="0,10,0,2" />
             <TextBlock Text="{Binding AppVersion}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="12" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Center" Margin="0,7,0,0" />

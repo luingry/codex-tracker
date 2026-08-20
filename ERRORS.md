@@ -1,5 +1,12 @@
 # Erros e solucoes conhecidas
 
+## Fixture SQLite não liberava o arquivo temporário no Windows
+
+- **Sintoma:** o cleanup da fixture de títulos por chat falhava com `IOException` ao apagar o banco SQLite temporário após a consulta.
+- **Causa:** conexões de fixture usavam o pool padrão do provider e podiam manter um handle do arquivo até depois do fim do bloco `using`.
+- **Solução:** os testes chamam `SqliteConnection.ClearAllPools()` antes de remover o diretório temporário; o índice de produção já usa `Pooling=false` em sua conexão somente leitura.
+- **Prevenção:** ao apagar bancos SQLite temporários no Windows, limpe explicitamente os pools do provider antes de `Directory.Delete`.
+
 ## Nova execução no mesmo chat root duplicava a linha concluída
 
 - **Sintoma:** depois que um chat root concluía e ficava não lido, iniciar outra task nesse mesmo chat adicionava uma linha ativa sem remover a conclusão anterior; status e tempo apareciam em entradas separadas.

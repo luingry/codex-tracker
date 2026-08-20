@@ -25,6 +25,60 @@
     <local:CompactVisibilityConverter x:Key="CompactVisibility" />
     <local:CompactGaugeDiameterConverter x:Key="CompactGaugeDiameter" />
 
+    <Style x:Key="TokenUsageToolTip" TargetType="{x:Type ToolTip}">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="HasDropShadow" Value="True" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="{x:Type ToolTip}">
+            <ContentPresenter />
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <DataTemplate DataType="{x:Type local:TokenUsageTooltip}">
+      <Border Background="{DynamicResource DetailedSurface}" CornerRadius="8" Padding="12,10" MinWidth="210" MaxWidth="300">
+        <Grid>
+          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="8" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+          <StackPanel>
+            <TextBlock Text="{Binding Title}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" TextTrimming="CharacterEllipsis" />
+            <TextBlock Text="{Binding EstimateNote}" Margin="0,1,0,6" FontFamily="./assets/fonts/#Atkinson Hyperlegible Next" FontSize="8" Foreground="{DynamicResource SoftInk}" />
+            <ItemsControl ItemsSource="{Binding Categories}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Grid Margin="0,2">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding Label}" FontFamily="./assets/fonts/#Atkinson Hyperlegible Next" FontSize="9" Foreground="{DynamicResource SoftInk}" TextTrimming="CharacterEllipsis" Margin="0,0,12,0" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                      <TextBlock Text="{Binding Cost}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="8.5" Foreground="{DynamicResource SoftInk}" />
+                      <TextBlock Text=" · " FontFamily="./assets/fonts/#Source Sans 3" FontSize="8.5" Foreground="{DynamicResource SoftInk}" />
+                      <TextBlock Text="{Binding Tokens}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9.5" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" />
+                    </StackPanel>
+                    <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Value="{Binding Fraction}" Maximum="1" Height="3" Margin="0,3,0,0" Background="{DynamicResource Sage}" Foreground="{DynamicResource Accent}" VerticalAlignment="Bottom" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+          <Border Grid.Row="2" Height="1" Background="{DynamicResource InputSurface}" VerticalAlignment="Center" />
+          <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding Total.Label}" FontFamily="./assets/fonts/#Atkinson Hyperlegible Next" FontSize="9.5" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+              <TextBlock Text="{Binding Total.Cost}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="8.5" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" />
+              <TextBlock Text=" · " FontFamily="./assets/fonts/#Source Sans 3" FontSize="8.5" Foreground="{DynamicResource SoftInk}" />
+              <TextBlock Text="{Binding Total.Tokens}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource Ink}" />
+            </StackPanel>
+          </Grid>
+        </Grid>
+      </Border>
+    </DataTemplate>
+
     <Style TargetType="Button">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />

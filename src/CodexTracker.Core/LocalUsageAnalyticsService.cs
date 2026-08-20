@@ -4,12 +4,25 @@ using System.Security.Cryptography;
 
 namespace CodexTracker.Core;
 
-public sealed record ModelUsage(string Model, long Tokens, decimal CostUsd, bool Priced);
-public sealed record DailyTokenUsage(DateTime Day, long Tokens, decimal UsdCost = 0, decimal BrlCost = 0);
-public sealed record TimedTokenUsage(DateTimeOffset At, long Tokens, decimal CostUsd = 0);
-public sealed record TimedModelUsage(DateTimeOffset At, string Model, long Tokens, decimal CostUsd = 0, bool Priced = false);
+public sealed record TokenUsageBreakdown(long CachedReadTokens, long InputTokens, long OutputTokens, long ReasoningTokens, decimal CachedReadCostUsd = 0, decimal InputCostUsd = 0, decimal OutputCostUsd = 0, decimal ReasoningCostUsd = 0)
+{
+    public long TotalTokens => CachedReadTokens + InputTokens + OutputTokens + ReasoningTokens;
+    public decimal TotalCostUsd => CachedReadCostUsd + InputCostUsd + OutputCostUsd + ReasoningCostUsd;
+    public static TokenUsageBreakdown Zero { get; } = new(0, 0, 0, 0);
+    public static TokenUsageBreakdown operator +(TokenUsageBreakdown left, TokenUsageBreakdown right) => new(
+        left.CachedReadTokens + right.CachedReadTokens, left.InputTokens + right.InputTokens,
+        left.OutputTokens + right.OutputTokens, left.ReasoningTokens + right.ReasoningTokens,
+        left.CachedReadCostUsd + right.CachedReadCostUsd, left.InputCostUsd + right.InputCostUsd,
+        left.OutputCostUsd + right.OutputCostUsd, left.ReasoningCostUsd + right.ReasoningCostUsd);
+}
+
+public sealed record ModelUsage(string Model, long Tokens, decimal CostUsd, bool Priced, TokenUsageBreakdown? Breakdown = null);
+public sealed record DailyTokenUsage(DateTime Day, long Tokens, decimal UsdCost = 0, decimal BrlCost = 0, TokenUsageBreakdown? Breakdown = null);
+public sealed record TimedTokenUsage(DateTimeOffset At, long Tokens, decimal CostUsd = 0, TokenUsageBreakdown? Breakdown = null);
+public sealed record TimedModelUsage(DateTimeOffset At, string Model, long Tokens, decimal CostUsd = 0, bool Priced = false, TokenUsageBreakdown? Breakdown = null);
+public sealed record ChatUsage(string ThreadId, string? ProjectPath, string? Title, long Tokens, decimal CostUsd, long PricedTokens, TokenUsageBreakdown Breakdown);
 public sealed record UsageWindowEstimate(long Tokens, decimal CostUsd, decimal CostBrl);
-public sealed record UsageAnalytics(long TodayTokens, long MonthTokens, decimal MonthUsd, decimal MonthBrl, double CoveragePercent, IReadOnlyList<ModelUsage> Models, decimal TodayUsd = 0, decimal TodayBrl = 0, IReadOnlyList<DailyTokenUsage>? DailySeries = null, IReadOnlyList<TimedTokenUsage>? Timeline = null, decimal UsdBrl = 0, IReadOnlyList<TimedModelUsage>? ModelTimeline = null)
+public sealed record UsageAnalytics(long TodayTokens, long MonthTokens, decimal MonthUsd, decimal MonthBrl, double CoveragePercent, IReadOnlyList<ModelUsage> Models, decimal TodayUsd = 0, decimal TodayBrl = 0, IReadOnlyList<DailyTokenUsage>? DailySeries = null, IReadOnlyList<TimedTokenUsage>? Timeline = null, decimal UsdBrl = 0, IReadOnlyList<TimedModelUsage>? ModelTimeline = null, IReadOnlyList<ChatUsage>? Chats = null)
 {
     public long TokensInWindow(DateTimeOffset startInclusive, DateTimeOffset endExclusive) =>
         (Timeline ?? []).Where(x => x.At >= startInclusive && x.At < endExclusive).Sum(x => x.Tokens);
@@ -24,7 +37,8 @@ public sealed record UsageAnalytics(long TodayTokens, long MonthTokens, decimal 
     public IReadOnlyList<ModelUsage> ModelsInWindow(DateTimeOffset startInclusive, DateTimeOffset endExclusive) =>
         (ModelTimeline ?? []).Where(x => x.At >= startInclusive && x.At < endExclusive)
             .GroupBy(x => new { x.Model, x.Priced })
-            .Select(group => new ModelUsage(group.Key.Model, group.Sum(x => x.Tokens), group.Sum(x => x.CostUsd), group.Key.Priced))
+            .Select(group => new ModelUsage(group.Key.Model, group.Sum(x => x.Tokens), group.Sum(x => x.CostUsd), group.Key.Priced,
+                group.Aggregate(TokenUsageBreakdown.Zero, (breakdown, item) => breakdown + (item.Breakdown ?? TokenUsageBreakdown.Zero))))
             .OrderByDescending(x => x.Tokens)
             .ToArray();
 
@@ -45,6 +59,8 @@ public sealed class LocalUsageAnalyticsService
     private readonly string? _stateDatabasePath;
     private ThreadModelIndex? _threadModelIndex;
     private string? _threadModelIndexPath;
+    private ThreadTitleIndex? _threadTitleIndex;
+    private string? _threadTitleIndexPath;
 
     public LocalUsageAnalyticsService(Func<DateTimeOffset>? clock = null, int? maxParseParallelism = null, string? stateDatabasePath = null)
     {
@@ -83,6 +99,7 @@ public sealed class LocalUsageAnalyticsService
         LogicalStreamsLastRead = 0;
         DuplicatePhysicalFilesIgnoredLastRead = 0;
         var stopwatch = Stopwatch.StartNew();
+        var projectRoots = new ProjectRootResolver();
         var now = _clock();
         // An active seven-day quota window can start no earlier than seven days ago.
         // Keep one extra day for clock/refresh skew while bounding memory independently
@@ -95,6 +112,7 @@ public sealed class LocalUsageAnalyticsService
             ? [root]
             : DefaultRoots(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         var fallbackModels = ReadFallbackModels(root);
+        var fallbackTitles = ReadFallbackTitles(root);
         var files = roots.Where(Directory.Exists).SelectMany(path => Directory.EnumerateFiles(path, "*.jsonl", SearchOption.AllDirectories))
             .Select(file => Describe(file)).ToArray();
         if (files.Length == 0) return new(0, 0, 0, 0, 0, []);
@@ -192,33 +210,81 @@ public sealed class LocalUsageAnalyticsService
         LogicalStreamsLastRead = logicalCandidates.Length;
         DuplicatePhysicalFilesIgnoredLastRead = candidates.Count - logicalCandidates.Length;
         var month = buckets.Where(x => x.Key.Day.Year == now.Year && x.Key.Day.Month == now.Month);
+        var candidatesByThread = logicalCandidates.GroupBy(x => x.File.ThreadId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.OrderBy(x => x.File.Path, StringComparer.OrdinalIgnoreCase).First(), StringComparer.OrdinalIgnoreCase);
+        string RootThread(string threadId)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (candidatesByThread.TryGetValue(threadId, out var current) && !string.IsNullOrWhiteSpace(current.File.ParentThreadId) && seen.Add(threadId))
+                threadId = current.File.ParentThreadId!;
+            return threadId;
+        }
+        var chatAggregates = new Dictionary<string, ChatAggregate>(StringComparer.OrdinalIgnoreCase);
+        foreach (var candidate in logicalCandidates)
+        {
+            var rootThreadId = RootThread(candidate.File.ThreadId);
+            var monthAggregate = candidate.Cache.Buckets.Where(x => x.Key.Day.Year == now.Year && x.Key.Day.Month == now.Month).ToArray();
+            if (monthAggregate.Length == 0) continue;
+            var aggregate = chatAggregates.TryGetValue(rootThreadId, out var currentAggregate) ? currentAggregate : ChatAggregate.Empty;
+            var rootProjectPath = candidatesByThread.TryGetValue(rootThreadId, out var rootCandidate) ? projectRoots.Resolve(rootCandidate.File.ProjectPath) : null;
+            aggregate = aggregate with
+            {
+                Usage = aggregate.Usage + CalculateBreakdown(monthAggregate),
+                Tokens = aggregate.Tokens + monthAggregate.Sum(x => x.Value.Total),
+                PricedTokens = aggregate.PricedTokens + monthAggregate.Where(x => Prices.Keys.Any(price => string.Equals(price, x.Key.Model, StringComparison.OrdinalIgnoreCase))).Sum(x => x.Value.Total),
+                ProjectPath = aggregate.ProjectPath ?? rootProjectPath ?? projectRoots.Resolve(candidate.File.ProjectPath)
+            };
+            chatAggregates[rootThreadId] = aggregate;
+        }
+        var chats = chatAggregates.Select(pair => new ChatUsage(pair.Key, pair.Value.ProjectPath,
+            fallbackTitles.TryGetValue(pair.Key, out var title) ? title : null, pair.Value.Tokens, pair.Value.Usage.TotalCostUsd, pair.Value.PricedTokens, pair.Value.Usage))
+            .OrderByDescending(chat => chat.Tokens).ToArray();
         var models = month.GroupBy(x => x.Key.Model).Select(g =>
         {
             var tokens = g.Sum(x => x.Value.Total);
             var key = Prices.Keys.FirstOrDefault(k => string.Equals(g.Key, k, StringComparison.OrdinalIgnoreCase));
-            if (key is null) return new ModelUsage(g.Key, tokens, 0, false);
-            return new ModelUsage(g.Key, tokens, CalculateCostUsd(g.Select(x => x.Value), Prices[key]), true);
+            var breakdown = CalculateBreakdown(g.Select(x => x.Value), key is null ? null : Prices[key]);
+            if (key is null) return new ModelUsage(g.Key, tokens, 0, false, breakdown);
+            return new ModelUsage(g.Key, tokens, breakdown.TotalCostUsd, true, breakdown);
         }).OrderByDescending(x => x.Tokens).ToArray();
         var total = models.Sum(x => x.Tokens);
         var todayBuckets = buckets.Where(x => x.Key.Day == now.LocalDateTime.Date).ToArray();
-        var todayUsd = CalculateCostUsd(todayBuckets);
+        var todayUsd = CalculateBreakdown(todayBuckets).TotalCostUsd;
         var daysInMonth = DateTime.DaysInMonth(now.Year, now.Month);
         var dailySeries = Enumerable.Range(1, daysInMonth)
             .Select(day =>
             {
                 var date = new DateTime(now.Year, now.Month, day);
                 var dayBuckets = buckets.Where(x => x.Key.Day == date).ToArray();
-                var costUsd = CalculateCostUsd(dayBuckets);
-                return new DailyTokenUsage(date, dayBuckets.Sum(x => x.Value.Total), costUsd, costUsd * usdBrl);
+                var breakdown = CalculateBreakdown(dayBuckets);
+                return new DailyTokenUsage(date, dayBuckets.Sum(x => x.Value.Total), breakdown.TotalCostUsd, breakdown.TotalCostUsd * usdBrl, breakdown);
             })
             .ToArray();
-        var timedSeries = timeline.OrderBy(x => x.Key.At).Select(x => new TimedTokenUsage(x.Key.At, x.Value.Tokens, x.Value.CostUsd)).ToArray();
-        var timedModelSeries = modelTimeline.OrderBy(x => x.Key.At).Select(x => new TimedModelUsage(x.Key.At, x.Key.Model, x.Value.Tokens, x.Value.CostUsd, x.Key.Priced)).ToArray();
+        var timedSeries = timeline.OrderBy(x => x.Key.At).Select(x => new TimedTokenUsage(x.Key.At, x.Value.Tokens, x.Value.CostUsd, x.Value.Breakdown)).ToArray();
+        var timedModelSeries = modelTimeline.OrderBy(x => x.Key.At).Select(x => new TimedModelUsage(x.Key.At, x.Key.Model, x.Value.Tokens, x.Value.CostUsd, x.Key.Priced, x.Value.Breakdown)).ToArray();
         SanitizedLogger.Write("Analytics refreshed: models=" + models.Length + ", files=" + files.Length + ", streams=" + LogicalStreamsLastRead + ", duplicateSnapshots=" + DuplicatePhysicalFilesIgnoredLastRead + ", ms=" + stopwatch.ElapsedMilliseconds);
-        return new(todayBuckets.Sum(x => x.Value.Total), total, models.Sum(x => x.CostUsd), models.Sum(x => x.CostUsd) * usdBrl, total == 0 ? 0 : 100d * models.Where(x => x.Priced).Sum(x => x.Tokens) / total, models, todayUsd, todayUsd * usdBrl, dailySeries, timedSeries, usdBrl, timedModelSeries);
+        return new(todayBuckets.Sum(x => x.Value.Total), total, models.Sum(x => x.CostUsd), models.Sum(x => x.CostUsd) * usdBrl, total == 0 ? 0 : 100d * models.Where(x => x.Priced).Sum(x => x.Tokens) / total, models, todayUsd, todayUsd * usdBrl, dailySeries, timedSeries, usdBrl, timedModelSeries, chats);
     }
 
-    private static decimal CalculateCostUsd(IEnumerable<Aggregate> aggregates, (decimal Input, decimal Cached, decimal Output) price) => aggregates.Sum(value => (Math.Max(value.Input - value.Cached, 0) * price.Input + value.Cached * price.Cached + (value.Output + value.Reasoning) * price.Output) / 1_000_000m);
+    private static TokenUsageBreakdown CalculateBreakdown(IEnumerable<Aggregate> aggregates, (decimal Input, decimal Cached, decimal Output)? price = null)
+    {
+        var total = TokenUsageBreakdown.Zero;
+        foreach (var value in aggregates)
+        {
+            var cached = Math.Max(value.Cached, 0);
+            var input = Math.Max(value.Input - cached, 0);
+            var reasoning = Math.Max(value.Reasoning, 0);
+            var output = Math.Max(value.Output - reasoning, 0);
+            var million = 1_000_000m;
+            var tariff = price.GetValueOrDefault();
+            total += new TokenUsageBreakdown(cached, input, output, reasoning,
+                price.HasValue ? cached * tariff.Cached / million : 0,
+                price.HasValue ? input * tariff.Input / million : 0,
+                price.HasValue ? output * tariff.Output / million : 0,
+                price.HasValue ? reasoning * tariff.Output / million : 0);
+        }
+        return total;
+    }
 
     private IReadOnlyDictionary<string, string> ReadFallbackModels(string? root)
     {
@@ -232,13 +298,36 @@ public sealed class LocalUsageAnalyticsService
         return _threadModelIndex.Read();
     }
 
+    private IReadOnlyDictionary<string, string> ReadFallbackTitles(string? root)
+    {
+        var databasePath = _stateDatabasePath ?? (root is null ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "state_5.sqlite") : null);
+        if (string.IsNullOrWhiteSpace(databasePath)) return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (_threadTitleIndex is null || !string.Equals(_threadTitleIndexPath, databasePath, StringComparison.OrdinalIgnoreCase))
+        {
+            _threadTitleIndex = new ThreadTitleIndex(databasePath!);
+            _threadTitleIndexPath = databasePath;
+        }
+        return _threadTitleIndex.Read();
+    }
+
     private static decimal CalculateCostUsd(IEnumerable<KeyValuePair<BucketKey, Aggregate>> buckets)
     {
         var total = 0m;
         foreach (var bucket in buckets)
         {
             var key = Prices.Keys.FirstOrDefault(priceKey => string.Equals(bucket.Key.Model, priceKey, StringComparison.OrdinalIgnoreCase));
-            if (key is not null) total += CalculateCostUsd([bucket.Value], Prices[key]);
+            if (key is not null) total += CalculateBreakdown([bucket.Value], Prices[key]).TotalCostUsd;
+        }
+        return total;
+    }
+
+    private static TokenUsageBreakdown CalculateBreakdown(IEnumerable<KeyValuePair<BucketKey, Aggregate>> buckets)
+    {
+        var total = TokenUsageBreakdown.Zero;
+        foreach (var bucket in buckets)
+        {
+            var key = Prices.Keys.FirstOrDefault(priceKey => string.Equals(bucket.Key.Model, priceKey, StringComparison.OrdinalIgnoreCase));
+            total += CalculateBreakdown([bucket.Value], key is null ? null : Prices[key]);
         }
         return total;
     }
@@ -264,13 +353,15 @@ public sealed class LocalUsageAnalyticsService
                 // be inherited parent context embedded in a fork and must not replace its id.
                 sessionId = ReadString(meta, "session_id");
                 fileId = ReadString(meta, "id");
+                var parentThreadId = ReadString(meta, "parent_thread_id") ?? ReadString(meta, "forked_from_id");
+                var projectPath = ReadString(meta, "cwd");
                 startedAt = ReadTimestamp(root) ?? ReadTimestamp(meta);
                 fork = !string.IsNullOrWhiteSpace(ReadString(meta, "forked_from_id")) || ReadString(meta, "thread_source") == "subagent";
-                break;
+                return new(path, sessionId ?? path, fileId ?? path, parentThreadId, projectPath, fork, startedAt);
             }
         }
         catch { SanitizedLogger.Write("Analytics metadata skipped"); }
-        return new(path, sessionId ?? path, fileId ?? path, fork, startedAt);
+        return new(path, sessionId ?? path, fileId ?? path, null, null, fork, startedAt);
     }
 
     private static ParseAggregateResult ParseAggregate(string file, long offset, long snapshotLength, Totals? baseline, string model, bool isFork, DateTimeOffset timelineCutoff)
@@ -314,10 +405,11 @@ public sealed class LocalUsageAnalyticsService
                     {
                         var timelineKey = new TimelineKey(at);
                         var priceKey = Prices.Keys.FirstOrDefault(key => string.Equals(model, key, StringComparison.OrdinalIgnoreCase));
-                        var costUsd = priceKey is null ? 0 : CalculateCostUsd([new Aggregate(delta.Input, delta.Cached, delta.Output, delta.Reasoning, delta.Total)], Prices[priceKey]);
-                        timeline[timelineKey] = Net48Compatibility.GetValueOrDefault(timeline, timelineKey) + new TimelineAggregate(delta.Total, costUsd);
+                        var breakdown = CalculateBreakdown([new Aggregate(delta.Input, delta.Cached, delta.Output, delta.Reasoning, delta.Total)], priceKey is null ? null : Prices[priceKey]);
+                        var costUsd = breakdown.TotalCostUsd;
+                        timeline[timelineKey] = Net48Compatibility.GetValueOrDefault(timeline, timelineKey) + new TimelineAggregate(delta.Total, costUsd, breakdown);
                         var modelTimelineKey = new ModelTimelineKey(at, model, priceKey is not null);
-                        modelTimeline[modelTimelineKey] = Net48Compatibility.GetValueOrDefault(modelTimeline, modelTimelineKey) + new TimelineAggregate(delta.Total, costUsd);
+                        modelTimeline[modelTimelineKey] = Net48Compatibility.GetValueOrDefault(modelTimeline, modelTimelineKey) + new TimelineAggregate(delta.Total, costUsd, breakdown);
                     }
                 }
             }
@@ -328,7 +420,10 @@ public sealed class LocalUsageAnalyticsService
 
     private static string? ReadString(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     private static DateTimeOffset? ReadTimestamp(JsonElement element) => ReadString(element, "timestamp") is { } value && DateTimeOffset.TryParse(value, out var timestamp) ? timestamp.ToUniversalTime() : null;
-    private sealed record FileDescriptor(string Path, string SessionId, string FileId, bool IsFork, DateTimeOffset? StartedAt);
+    private sealed record FileDescriptor(string Path, string SessionId, string FileId, string? ParentThreadId, string? ProjectPath, bool IsFork, DateTimeOffset? StartedAt)
+    {
+        public string ThreadId => FileId;
+    }
     private sealed record LogicalFileCandidate(FileDescriptor File, CachedFile Cache);
     private enum ParseKind { Partial, Rebuild, Append }
     private sealed record ParsePlan(FileDescriptor File, FileSignature Signature, CachedFile? Previous, ParseKind Kind, string FallbackModel);
@@ -402,13 +497,17 @@ public sealed class LocalUsageAnalyticsService
     private readonly record struct BucketKey(DateTime Day, string Model);
     private readonly record struct TimelineKey(DateTimeOffset At);
     private readonly record struct ModelTimelineKey(DateTimeOffset At, string Model, bool Priced);
-    private readonly record struct TimelineAggregate(long Tokens, decimal CostUsd)
+    private readonly record struct TimelineAggregate(long Tokens, decimal CostUsd, TokenUsageBreakdown? Breakdown)
     {
-        public static TimelineAggregate operator +(TimelineAggregate left, TimelineAggregate right) => new(left.Tokens + right.Tokens, left.CostUsd + right.CostUsd);
+        public static TimelineAggregate operator +(TimelineAggregate left, TimelineAggregate right) => new(left.Tokens + right.Tokens, left.CostUsd + right.CostUsd, (left.Breakdown ?? TokenUsageBreakdown.Zero) + (right.Breakdown ?? TokenUsageBreakdown.Zero));
     }
     private readonly record struct Aggregate(long Input, long Cached, long Output, long Reasoning, long Total)
     {
         public static Aggregate operator +(Aggregate left, Aggregate right) => new(left.Input + right.Input, left.Cached + right.Cached, left.Output + right.Output, left.Reasoning + right.Reasoning, left.Total + right.Total);
+    }
+    private readonly record struct ChatAggregate(string? ProjectPath, long Tokens, long PricedTokens, TokenUsageBreakdown Usage)
+    {
+        public static ChatAggregate Empty => new(null, 0, 0, TokenUsageBreakdown.Zero);
     }
 
     private static void MergeBuckets(Dictionary<BucketKey, Aggregate> destination, IReadOnlyDictionary<BucketKey, Aggregate> source)
@@ -463,7 +562,7 @@ public sealed class LocalUsageAnalyticsService
             var input = Get("input_tokens");
             var output = Get("output_tokens");
             var reasoning = Get("reasoning_output_tokens");
-            return new(input, Get("cached_input_tokens"), output, reasoning, input + output + reasoning);
+            return new(input, Get("cached_input_tokens"), output, reasoning, input + output);
         }
         public bool IsMonotonicAfter(Totals other) => Input >= other.Input && Cached >= other.Cached && Output >= other.Output && Reasoning >= other.Reasoning;
         public static Totals operator -(Totals a, Totals b) => new(a.Input - b.Input, a.Cached - b.Cached, a.Output - b.Output, a.Reasoning - b.Reasoning, a.Total - b.Total);
