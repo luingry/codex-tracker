@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.9] - 2026-08-21
+
+### Fixed
+
+- Agent rows now receive definitive Codex chat titles immediately after the app-server resolves them, without waiting for the next activity refresh.
+
 ## [0.18.8] - 2026-08-21
 
 ### Fixed

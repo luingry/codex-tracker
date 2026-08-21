@@ -336,6 +336,7 @@ var refreshAgentsEnd = mainWindowCode.IndexOf("private void ToggleAgentList", re
 var refreshAgentsCode = refreshAgentsStart >= 0 && refreshAgentsEnd > refreshAgentsStart ? mainWindowCode.Substring(refreshAgentsStart, refreshAgentsEnd - refreshAgentsStart) : string.Empty;
 Assert(refreshAgentsCode.Contains("else if (_settings.IsAgentListExpanded && !_viewModel.Expanded) _viewModel.IsAgentListOpen = true;", StringComparison.Ordinal), "agent refresh never opens the list while detailed mode is active");
 Assert(mainWindowCode.Contains("_unreadAgentWorks[index] = work with { Title = title.Trim() };", StringComparison.Ordinal) && mainWindowCode.Contains("if (unreadChanged)", StringComparison.Ordinal) && mainWindowCode.Contains("PersistUnreadAgentWorks();", StringComparison.Ordinal), "late app-server titles replace and persist fallback titles for unread completed work");
+Assert(mainWindowCode.Contains("_viewModel.ApplyAgentTitles(titles);", StringComparison.Ordinal), "late app-server titles immediately update active agent rows instead of waiting for the next activity snapshot");
 Assert(mainWindowCode.Contains("_unreadAgentWorks.RemoveAll(work => activeThreadIds.Contains(work.ThreadId))", StringComparison.Ordinal), "agent refresh permanently discards an old unread completion when the same root chat starts running again");
 var markAllReadStart = mainWindowCode.IndexOf("private void MarkAllCompletedAgentsRead", StringComparison.Ordinal);
 var markAllReadEnd = mainWindowCode.IndexOf("private void PersistUnreadAgentWorks", markAllReadStart, StringComparison.Ordinal);
@@ -354,6 +355,8 @@ Assert(agentRowsViewModel.ActiveAgents.Count == 2 && !agentRowsViewModel.ActiveA
 var stableVisualRow = agentRowsViewModel.AgentItems[0];
 agentRowsViewModel.ApplyAgents([rootAgent, childAgent], agentRowsNow.AddSeconds(2), false, animationsEnabled: true);
 Assert(ReferenceEquals(stableVisualRow, agentRowsViewModel.AgentItems[0]), "unchanged active rows retain their visual identity so the reasoning glow completes its sweep and delay without restarting on each refresh");
+agentRowsViewModel.ApplyAgentTitles(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["root"] = "Titulo definitivo" });
+Assert(ReferenceEquals(stableVisualRow, agentRowsViewModel.AgentItems[0]) && stableVisualRow.Title == "Titulo definitivo" && agentRowsViewModel.AgentItems.Count == 2, "a definitive app-server title updates an active root row immediately without recreating it or affecting its child row");
 agentRowsViewModel.MarkNewAgentRowsStable();
 Assert(agentRowsViewModel.ActiveAgents.All(row => !row.IsNew), "agent row entry flags clear after their one-time animation");
 var reducedMotionAgents = new MainViewModel();

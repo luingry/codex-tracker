@@ -111,6 +111,13 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
         SetProject(agent.ProjectPath);
     }
 
+    public void UpdateTitle(string title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return;
+        _sourceTitle = title.Trim();
+        Set(ref _title, LocalizationManager.TranslateKnown(_sourceTitle), nameof(Title));
+    }
+
     public void MarkStable() => Set(ref _isNew, false, nameof(IsNew));
     public void SetProjectSeparator(bool value) => Set(ref _showsProjectSeparator, value, nameof(ShowsProjectSeparator));
     public void RefreshLocalization()
@@ -284,6 +291,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new(nameof(ShowsCompletedIndicator)));
         PropertyChanged?.Invoke(this, new(nameof(AgentIndicatorTooltip)));
         RefreshAgentItems();
+    }
+
+    public void ApplyAgentTitles(IReadOnlyDictionary<string, string> titles)
+    {
+        foreach (var row in ActiveAgents)
+            if (titles.TryGetValue(row.ThreadId, out var title)) row.UpdateTitle(title);
     }
 
     public void ApplyUnreadCompletedAgents(IReadOnlyList<CompletedAgentWork> works)

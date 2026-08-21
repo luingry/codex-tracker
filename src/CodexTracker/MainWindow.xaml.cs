@@ -305,6 +305,7 @@ public partial class MainWindow : Window
             foreach (var threadId in threadIds) _threadTitleLookups[threadId] = attemptedAt;
             var titles = await _client.ReadThreadTitlesAsync(threadIds, _shutdown.Token);
             foreach (var title in titles) _threadTitles[title.Key] = title.Value;
+            _viewModel.ApplyAgentTitles(titles);
             var unreadChanged = false;
             for (var index = 0; index < _unreadAgentWorks.Count; index++)
             {
