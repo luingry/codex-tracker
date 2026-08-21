@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private readonly LocalUsageAnalyticsService _analytics = new();
     private readonly StartupAnalyticsCoordinator _startupAnalytics = new();
     private readonly AgentActivityService _agentActivity = new();
+    private readonly CodexDesktopUnreadThreadIndex _codexUnreadThreads = new();
     private readonly UpdateController _updates = new();
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(60) };
     private readonly DispatcherTimer _agentTimer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -250,7 +251,11 @@ public partial class MainWindow : Window
         try
         {
             var titles = new Dictionary<string, string>(_threadTitles, StringComparer.OrdinalIgnoreCase);
-            var activity = await Task.Run(() => _agentActivity.ReadSnapshot(titles));
+            var activityTask = Task.Run(() => _agentActivity.ReadSnapshot(titles));
+            var codexUnreadTask = Task.Run(() => _codexUnreadThreads.Read());
+            await Task.WhenAll(activityTask, codexUnreadTask);
+            var activity = activityTask.Result;
+            var codexUnread = codexUnreadTask.Result;
             var agents = activity.ActiveAgents;
             var unreadChanged = false;
             if (!_agentStateInitialized)
@@ -268,6 +273,11 @@ public partial class MainWindow : Window
             }
             var activeThreadIds = agents.Select(agent => agent.ThreadId).ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (_unreadAgentWorks.RemoveAll(work => activeThreadIds.Contains(work.ThreadId)) > 0) unreadChanged = true;
+            if (codexUnread.IsAvailable && _unreadAgentWorks.RemoveAll(work => !codexUnread.ThreadIds.Contains(work.ThreadId, StringComparer.OrdinalIgnoreCase)) > 0)
+            {
+                unreadChanged = true;
+                SanitizedLogger.Write("Unread agent work reconciled from Codex desktop state");
+            }
             if (unreadChanged) PersistUnreadAgentWorks();
             var previouslyVisibleIndicator = _viewModel.HasAgentIndicator;
             var previouslyActive = _viewModel.HasActiveAgents;

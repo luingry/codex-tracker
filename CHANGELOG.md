@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.18.11] - 2026-08-21
+
+### Fixed
+
+- Removed the unsolicited Tracker-only read-state notice from the agent list.
+
+## [0.18.10] - 2026-08-21
+
+### Fixed
+
+- Reconciled unread completed root-chat work with the Codex desktop's local unread-thread state, so opening a pending chat directly in Codex removes it from the Tracker list.
+
+### Changed
+
+- Clarified that marking all completed work as read is local to Codex Tracker because the exposed Codex protocol has no safe, verifiable mark-all-read operation.
+
 ## [0.18.9] - 2026-08-21
 
 ### Fixed
