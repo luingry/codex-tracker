@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.13] - 2026-08-21
+
+### Fixed
+
+- Stopped inferring that a completed chat was read from the Codex desktop's global unread-thread index. Returning Codex to the foreground while another chat is selected no longer clears the Tracker row; only explicit Tracker actions or a new execution in the same root chat clear it.
+
 ## [0.18.12] - 2026-08-21
 
 ### Fixed

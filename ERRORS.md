@@ -1,11 +1,11 @@
 # Erros e solucoes conhecidas
 
-## Conclusão de agent era removida com Codex em segundo plano
+## Conclusão de agent era removida sem confirmação de leitura no Codex
 
-- **Sintoma:** ao concluir um chat já aberto no Codex, a lista do Tracker podia remover sua conclusão não lida quando a janela do Codex estava em segundo plano ou minimizada.
-- **Causa:** `RefreshAgentsAsync` tratava a ausência no índice local de threads não lidas do desktop como leitura confirmada independentemente do estado da janela.
-- **Solução:** a reconciliação de ausências agora exige índice disponível e uma janela desktop do Codex em primeiro plano, visível e não minimizada; a remoção por retorno do root à atividade e as ações explícitas do Tracker permanecem inalteradas.
-- **Prevenção:** mantenha regressões determinísticas para background e minimizado preservarem a conclusão e para foreground visível não minimizado permitir a reconciliação.
+- **Sintoma:** ao concluir um chat já aberto no Codex, a lista do Tracker podia remover sua conclusão não lida quando a janela do Codex estava em segundo plano ou minimizada. A regra introduzida na 0.18.12 ainda era ampla: ao voltar o Codex para primeiro plano, ela também removia a conclusão de um chat não selecionado.
+- **Causa:** `RefreshAgentsAsync` tratava a ausência no índice global local de threads não lidas do desktop como leitura confirmada. Esse estado não expõe a thread global selecionada, então foco da janela e ausência de uma thread não provam que o usuário leu sua conclusão.
+- **Solução:** removida a reconciliação automática pelo índice unread do desktop, em fail-closed. A remoção continua apenas no clique explícito da linha do Tracker, em marcar todos como lidos, ou quando a mesma root chat volta a ficar ativa.
+- **Prevenção:** não deduza uma ação específica do usuário de estado global sem identidade da thread selecionada. Mantenha regressão que proíba qualquer remoção automática por ausência no índice unread e preserve as ações explícitas e a transição da mesma root para ativa.
 
 ## Chat sem projeto aparecia com diretorio transitorio como projeto
 
