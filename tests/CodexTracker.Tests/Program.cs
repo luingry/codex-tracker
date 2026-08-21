@@ -241,6 +241,9 @@ try
     File.WriteAllText(unreadStatePath, "{\"electron-persisted-atom-state\":{\"unread-thread-ids-by-host-v1\":{\"local\":[]}}}");
     var openedDirectlyInCodex = new CodexDesktopUnreadThreadIndex(unreadStatePath).Read();
     Assert(openedDirectlyInCodex.IsAvailable && !openedDirectlyInCodex.ThreadIds.Contains("root-unread", StringComparer.OrdinalIgnoreCase), "a Codex state update that removes a root chat is observable as read by the tracker");
+    Assert(!CodexDesktopUnreadReconciliation.CanReconcileAbsentThreads(openedDirectlyInCodex.IsAvailable, false, false), "a Codex unread-index absence does not clear tracker completion while Codex is backgrounded");
+    Assert(!CodexDesktopUnreadReconciliation.CanReconcileAbsentThreads(openedDirectlyInCodex.IsAvailable, true, true), "a Codex unread-index absence does not clear tracker completion while Codex is minimized");
+    Assert(CodexDesktopUnreadReconciliation.CanReconcileAbsentThreads(openedDirectlyInCodex.IsAvailable, true, false), "a Codex unread-index absence clears tracker completion only with a visible foreground non-minimized Codex window");
     File.WriteAllText(unreadStatePath, "{\"electron-persisted-atom-state\":{\"unread-thread-ids-by-host-v1\":{\"local\":{}}}}");
     Assert(!new CodexDesktopUnreadThreadIndex(unreadStatePath).Read().IsAvailable, "malformed Codex unread state fails closed and never clears tracker work");
 }
@@ -254,6 +257,7 @@ Assert(!WidgetVisibilityPolicy.ShouldShow(false, false, false, false, false) && 
 Assert(CodexDesktopWindowMonitor.IsCodexDesktopExecutable(@"C:\Program Files\WindowsApps\OpenAI.Codex_26.810.4967.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe") && CodexDesktopWindowMonitor.IsCodexDesktopExecutable(@"C:\Program Files\WindowsApps\OpenAI.Codex_26.810.4967.0_x64__2p2nqsd0c76g0\app\resources\codex.exe") && !CodexDesktopWindowMonitor.IsCodexDesktopExecutable(@"C:\Users\user\.codex\plugins\.plugin-appserver\codex.exe") && !CodexDesktopWindowMonitor.IsCodexDesktopExecutable(@"C:\Tools\ChatGPT.exe"), "desktop window detection accepts the real ChatGPT host and packaged Codex process while rejecting unrelated or CLI executables");
 var codexDesktopPath = @"C:\Program Files\WindowsApps\OpenAI.Codex_26.810.4967.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe";
 Assert(!CodexDesktopWindowMonitor.Observe(codexDesktopPath, false, false, false).IsForeground && !CodexDesktopWindowMonitor.Observe(codexDesktopPath, true, true, false).IsForeground && CodexDesktopWindowMonitor.Observe(codexDesktopPath, true, false, false).IsForeground && CodexDesktopWindowMonitor.Observe(codexDesktopPath, true, false, true) is { IsForeground: true, IsMinimized: true }, "desktop window observation rejects hidden and cloaked Codex HWNDs while retaining a visible minimized Codex window for the visibility policy");
+Assert(mainWindowSource.Contains("CodexDesktopUnreadReconciliation.CanReconcileAbsentThreads(codexUnread.IsAvailable, codexWindow.IsForeground, codexWindow.IsMinimized)", StringComparison.Ordinal), "Codex unread-index reconciliation is gated by foreground, visible and non-minimized desktop state");
 
 var agentRowsViewModel = new MainViewModel();
 Assert(CodexThreadDeepLink.TryCreate("018f18cc-9ffc-7bb3-9a48-7a3df5372adc", out var validThreadLink) && validThreadLink!.AbsoluteUri == "codex://threads/018f18cc-9ffc-7bb3-9a48-7a3df5372adc", "thread deep links accept a canonical UUID and target exactly its Codex thread");

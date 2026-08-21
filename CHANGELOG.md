@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.12] - 2026-08-21
+
+### Fixed
+
+- Preserved completed unread agent work when the Codex desktop is backgrounded or minimized; reconciliation from the Codex unread-thread index now removes a completion only while its window is visible, foregrounded, and not minimized.
+
 ## [0.18.11] - 2026-08-21
 
 ### Fixed

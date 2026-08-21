@@ -1,5 +1,12 @@
 # Erros e solucoes conhecidas
 
+## Conclusão de agent era removida com Codex em segundo plano
+
+- **Sintoma:** ao concluir um chat já aberto no Codex, a lista do Tracker podia remover sua conclusão não lida quando a janela do Codex estava em segundo plano ou minimizada.
+- **Causa:** `RefreshAgentsAsync` tratava a ausência no índice local de threads não lidas do desktop como leitura confirmada independentemente do estado da janela.
+- **Solução:** a reconciliação de ausências agora exige índice disponível e uma janela desktop do Codex em primeiro plano, visível e não minimizada; a remoção por retorno do root à atividade e as ações explícitas do Tracker permanecem inalteradas.
+- **Prevenção:** mantenha regressões determinísticas para background e minimizado preservarem a conclusão e para foreground visível não minimizado permitir a reconciliação.
+
 ## Chat sem projeto aparecia com diretorio transitorio como projeto
 
 - **Sintoma:** a lista de agents exibia o ultimo segmento de um `cwd` temporario, como `qu`, para um chat que nao pertencia a nenhum projeto; o rotulo esperado era `Sem projeto`.

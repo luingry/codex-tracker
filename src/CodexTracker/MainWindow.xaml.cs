@@ -273,7 +273,9 @@ public partial class MainWindow : Window
             }
             var activeThreadIds = agents.Select(agent => agent.ThreadId).ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (_unreadAgentWorks.RemoveAll(work => activeThreadIds.Contains(work.ThreadId)) > 0) unreadChanged = true;
-            if (codexUnread.IsAvailable && _unreadAgentWorks.RemoveAll(work => !codexUnread.ThreadIds.Contains(work.ThreadId, StringComparer.OrdinalIgnoreCase)) > 0)
+            var codexWindow = CodexDesktopWindowMonitor.Read();
+            if (CodexDesktopUnreadReconciliation.CanReconcileAbsentThreads(codexUnread.IsAvailable, codexWindow.IsForeground, codexWindow.IsMinimized) &&
+                _unreadAgentWorks.RemoveAll(work => !codexUnread.ThreadIds.Contains(work.ThreadId, StringComparer.OrdinalIgnoreCase)) > 0)
             {
                 unreadChanged = true;
                 SanitizedLogger.Write("Unread agent work reconciled from Codex desktop state");
