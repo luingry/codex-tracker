@@ -114,6 +114,7 @@
                 <Border.RenderTransform><TransformGroup><ScaleTransform x:Name="AgentListWrapperScale" /><TranslateTransform x:Name="AgentListWrapperTranslate" /></TransformGroup></Border.RenderTransform>
                 <Border.Effect><DropShadowEffect BlurRadius="12" ShadowDepth="3" Opacity=".28" Color="#151A18" /></Border.Effect>
                 <local:RoundedClipBorder x:Name="AgentListClipSurface" Padding="0" CornerRadius="12" Background="{DynamicResource DetailedSurface}" BorderThickness="0">
+                  <Grid>
                   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <ItemsControl ItemsSource="{Binding AgentItems}">
                   <ItemsControl.ItemTemplate>
@@ -155,7 +156,11 @@
                             <TextBlock Grid.Row="1" Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" TextTrimming="CharacterEllipsis" Margin="0,2.3,0,0" />
                             <Grid Grid.Row="2" Margin="0,2.3,0,0">
                               <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                              <TextBlock Text="{Binding Status}" FontSize="10.4" Foreground="{DynamicResource SoftInk}" TextTrimming="CharacterEllipsis" Margin="0,0,10,0" />
+                              <TextBlock x:Name="StatusLabel" Text="{Binding Status}" FontSize="10.4" Foreground="{DynamicResource SoftInk}" TextTrimming="CharacterEllipsis" Margin="0,0,10,0" />
+                              <StackPanel x:Name="CompletedStatus" Orientation="Horizontal" Visibility="Collapsed">
+                                <TextBlock Text="{Binding Status}" FontSize="10.4" Foreground="{DynamicResource SoftInk}" Margin="0,0,4,0" />
+                                <Path x:Name="CompletedRowCheck" Width="9" Height="7" Data="M1,4L4,7L9,1" Stretch="Uniform" Stroke="#168A4A" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" VerticalAlignment="Center" IsHitTestVisible="False" />
+                              </StackPanel>
                               <TextBlock x:Name="ReasoningGlow" Text="{Binding Status}" FontSize="10.4" TextTrimming="CharacterEllipsis" IsHitTestVisible="False" Margin="0,0,10,0">
                                 <TextBlock.Foreground>
                                   <LinearGradientBrush MappingMode="Absolute" StartPoint="0,0.5" EndPoint="64,0.5">
@@ -164,13 +169,10 @@
                                     <GradientStop Color="#D9F0F2F1" Offset="0.50" />
                                     <GradientStop Color="#00FFFFFF" Offset="0.64" />
                                   </LinearGradientBrush>
-                                </TextBlock.Foreground>
+                              </TextBlock.Foreground>
                               </TextBlock>
                               <Grid Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding Elapsed}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9.2" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Right" />
-                                <Path x:Name="CompletedRowCheck" Width="9" Height="7" Data="M1,4L4,7L9,1" Stretch="Uniform" Stroke="#168A4A" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Right" VerticalAlignment="Center" Visibility="Collapsed" IsHitTestVisible="False">
-                                  <Path.RenderTransform><TranslateTransform Y="-9" /></Path.RenderTransform>
-                                </Path>
                               </Grid>
                             </Grid>
                           </Grid>
@@ -203,7 +205,8 @@
                           <DataTrigger.ExitActions><StopStoryboard BeginStoryboardName="ReasoningGlowStoryboard" /></DataTrigger.ExitActions>
                         </DataTrigger>
                         <DataTrigger Binding="{Binding IsCompleted}" Value="True">
-                          <Setter TargetName="CompletedRowCheck" Property="Visibility" Value="Visible" />
+                          <Setter TargetName="StatusLabel" Property="Visibility" Value="Collapsed" />
+                          <Setter TargetName="CompletedStatus" Property="Visibility" Value="Visible" />
                           <Setter TargetName="ReasoningGlow" Property="Visibility" Value="Collapsed" />
                         </DataTrigger>
                       </DataTemplate.Triggers>
@@ -211,6 +214,12 @@
                   </ItemsControl.ItemTemplate>
                     </ItemsControl>
                   </ScrollViewer>
+                    <Button x:Name="MarkAllCompletedAgentsReadButton" Width="24" Height="24" Padding="4" Margin="0" HorizontalAlignment="Right" VerticalAlignment="Top" Panel.ZIndex="1"
+                            Background="{DynamicResource DetailedSurface}" Click="MarkAllCompletedAgentsRead" ToolTip="{DynamicResource Loc.MarkAllCompletedAgentsRead}" AutomationProperties.Name="{DynamicResource Loc.MarkAllCompletedAgentsRead}"
+                            Visibility="{Binding CanMarkAllCompletedAgentsRead, Converter={StaticResource BooleanToVisibility}}">
+                      <Viewbox Width="14" Height="14"><Canvas Width="24" Height="24"><Path Data="M2,12L7,17L16,8" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /><Path Data="M8,12L13,17L22,8" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /></Canvas></Viewbox>
+                    </Button>
+                  </Grid>
                 </local:RoundedClipBorder>
               </Border>
             </Border>

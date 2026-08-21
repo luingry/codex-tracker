@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.18.8] - 2026-08-21
+
+### Fixed
+
+- Agent-list project labels now use locally verifiable Git roots, so transient working directories appear as `Sem projeto` while subagents inherit a valid parent project.
+
+## [0.18.7] - 2026-08-21
+
+### Fixed
+
+- Preserved the identity, title, project grouping, and current-month usage of chats whose rollout JSONL is still open for writing.
+- Clarified completed-agent affordances with a double-check mark-all action and a completion check beside the completed status while elapsed time remains right-aligned.
+
+## [0.18.6] - 2026-08-21
+
+### Added
+
+- Added an overlay action in the agent list to mark all unread completed principal-agent work as read without opening individual chats.
+
+### Changed
+
+- Details by chat now lists chats by their most recent observed usage update, with deterministic fallbacks instead of token volume as the primary order.
+
 ## [0.18.5] - 2026-08-21
 
 ### Fixed

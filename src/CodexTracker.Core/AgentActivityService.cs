@@ -44,6 +44,7 @@ public sealed class AgentActivityService
     private readonly Func<DateTimeOffset> _now;
     private readonly TimeSpan _staleAfter;
     private readonly Dictionary<string, CachedRollout> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ProjectRootResolver _projectRoots = new();
 
     public AgentActivityService(Func<DateTimeOffset>? now = null, TimeSpan? staleAfter = null)
     {
@@ -193,7 +194,7 @@ public sealed class AgentActivityService
             state.ProjectPath);
     }
 
-    private static RolloutState Parse(string path, long offset, RolloutState initial)
+    private RolloutState Parse(string path, long offset, RolloutState initial)
     {
         var state = initial;
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -215,8 +216,8 @@ public sealed class AgentActivityService
                     var threadId = ReadString(payload, "id") ?? ReadString(payload, "session_id") ?? path;
                     var source = ReadString(payload, "thread_source");
                     var parent = ReadString(payload, "parent_thread_id") ?? ReadString(payload, "forked_from_id");
-                    var projectPath = ReadString(payload, "cwd");
-                    state = state with { ThreadId = threadId, ParentThreadId = parent, IsSubagent = source == "subagent" || !string.IsNullOrWhiteSpace(parent), AgentPath = ReadString(payload, "agent_path"), AgentNickname = ReadString(payload, "agent_nickname"), ProjectPath = projectPath, IsMemorySession = IsMemoryPath(projectPath) };
+                    var cwd = ReadString(payload, "cwd");
+                    state = state with { ThreadId = threadId, ParentThreadId = parent, IsSubagent = source == "subagent" || !string.IsNullOrWhiteSpace(parent), AgentPath = ReadString(payload, "agent_path"), AgentNickname = ReadString(payload, "agent_nickname"), ProjectPath = _projectRoots.Resolve(cwd), IsMemorySession = IsMemoryPath(cwd) };
                     continue;
                 }
 

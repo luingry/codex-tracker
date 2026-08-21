@@ -20,7 +20,7 @@ public sealed record ModelUsage(string Model, long Tokens, decimal CostUsd, bool
 public sealed record DailyTokenUsage(DateTime Day, long Tokens, decimal UsdCost = 0, decimal BrlCost = 0, TokenUsageBreakdown? Breakdown = null);
 public sealed record TimedTokenUsage(DateTimeOffset At, long Tokens, decimal CostUsd = 0, TokenUsageBreakdown? Breakdown = null);
 public sealed record TimedModelUsage(DateTimeOffset At, string Model, long Tokens, decimal CostUsd = 0, bool Priced = false, TokenUsageBreakdown? Breakdown = null);
-public sealed record ChatUsage(string ThreadId, string? ProjectPath, string? Title, long Tokens, decimal CostUsd, long PricedTokens, TokenUsageBreakdown Breakdown);
+public sealed record ChatUsage(string ThreadId, string? ProjectPath, string? Title, long Tokens, decimal CostUsd, long PricedTokens, TokenUsageBreakdown Breakdown, DateTimeOffset LastUpdatedAt);
 public sealed record UsageWindowEstimate(long Tokens, decimal CostUsd, decimal CostBrl);
 public sealed record UsageAnalytics(long TodayTokens, long MonthTokens, decimal MonthUsd, decimal MonthBrl, double CoveragePercent, IReadOnlyList<ModelUsage> Models, decimal TodayUsd = 0, decimal TodayBrl = 0, IReadOnlyList<DailyTokenUsage>? DailySeries = null, IReadOnlyList<TimedTokenUsage>? Timeline = null, decimal UsdBrl = 0, IReadOnlyList<TimedModelUsage>? ModelTimeline = null, IReadOnlyList<ChatUsage>? Chats = null)
 {
@@ -175,13 +175,13 @@ public sealed class LocalUsageAnalyticsService
                 MergeBuckets(cached.Buckets, parsed.Buckets);
                 MergeTimeline(cached.Timeline, parsed.Timeline);
                 MergeModelTimeline(cached.ModelTimeline, parsed.ModelTimeline);
-                cached = cached with { Signature = plan.Signature, FallbackModel = plan.FallbackModel, LastTotals = parsed.LastTotals ?? cached.LastTotals, LastModel = parsed.LastModel, PrefixMarker = PrefixMarker.Create(plan.File.Path, plan.Signature.Length) };
+                cached = cached with { Signature = plan.Signature, FallbackModel = plan.FallbackModel, LastTotals = parsed.LastTotals ?? cached.LastTotals, LastModel = parsed.LastModel, LastUsageAt = MostRecent(cached.LastUsageAt, parsed.LastUsageAt), PrefixMarker = PrefixMarker.Create(plan.File.Path, plan.Signature.Length) };
                 FilesAppendedLastRead++;
                 BytesReadLastRead += plan.Signature.Length - previousLength;
             }
             else
             {
-                cached = new CachedFile(plan.Signature, plan.File.IsFork, plan.FallbackModel, parsed.Buckets, parsed.Timeline, parsed.ModelTimeline, parsed.LastTotals, parsed.LastModel, plan.Kind == ParseKind.Partial ? "" : PrefixMarker.Create(plan.File.Path, plan.Signature.Length));
+                cached = new CachedFile(plan.Signature, plan.File.IsFork, plan.FallbackModel, parsed.Buckets, parsed.Timeline, parsed.ModelTimeline, parsed.LastTotals, parsed.LastModel, parsed.LastUsageAt, plan.Kind == ParseKind.Partial ? "" : PrefixMarker.Create(plan.File.Path, plan.Signature.Length));
                 FilesRebuiltLastRead++;
                 BytesReadLastRead += plan.Signature.Length;
             }
@@ -232,13 +232,18 @@ public sealed class LocalUsageAnalyticsService
                 Usage = aggregate.Usage + CalculateBreakdown(monthAggregate),
                 Tokens = aggregate.Tokens + monthAggregate.Sum(x => x.Value.Total),
                 PricedTokens = aggregate.PricedTokens + monthAggregate.Where(x => Prices.Keys.Any(price => string.Equals(price, x.Key.Model, StringComparison.OrdinalIgnoreCase))).Sum(x => x.Value.Total),
-                ProjectPath = aggregate.ProjectPath ?? rootProjectPath ?? projectRoots.Resolve(candidate.File.ProjectPath)
+                ProjectPath = aggregate.ProjectPath ?? rootProjectPath ?? projectRoots.Resolve(candidate.File.ProjectPath),
+                LastUpdatedAt = MostRecent(aggregate.LastUpdatedAt, candidate.Cache.LastUsageAt)
             };
             chatAggregates[rootThreadId] = aggregate;
         }
         var chats = chatAggregates.Select(pair => new ChatUsage(pair.Key, pair.Value.ProjectPath,
-            fallbackTitles.TryGetValue(pair.Key, out var title) ? title : null, pair.Value.Tokens, pair.Value.Usage.TotalCostUsd, pair.Value.PricedTokens, pair.Value.Usage))
-            .OrderByDescending(chat => chat.Tokens).ToArray();
+            fallbackTitles.TryGetValue(pair.Key, out var title) ? title : null, pair.Value.Tokens, pair.Value.Usage.TotalCostUsd, pair.Value.PricedTokens, pair.Value.Usage, pair.Value.LastUpdatedAt ?? DateTimeOffset.MinValue))
+            .OrderByDescending(chat => chat.LastUpdatedAt)
+            .ThenByDescending(chat => chat.Tokens)
+            .ThenBy(chat => chat.Title ?? "", StringComparer.OrdinalIgnoreCase)
+            .ThenBy(chat => chat.ThreadId, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var models = month.GroupBy(x => x.Key.Model).Select(g =>
         {
             var tokens = g.Sum(x => x.Value.Total);
@@ -340,8 +345,12 @@ public sealed class LocalUsageAnalyticsService
         var fork = false;
         try
         {
-            foreach (var line in File.ReadLines(path).Take(8))
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            for (var lineNumber = 0; lineNumber < 8; lineNumber++)
             {
+                var line = reader.ReadLine();
+                if (line is null) break;
                 using var doc = JsonDocument.Parse(line); var root = doc.RootElement;
                 JsonElement meta;
                 if (root.TryGetProperty("type", out var type) && type.GetString() == "session_meta" && root.TryGetProperty("payload", out var realPayload) && realPayload.ValueKind == JsonValueKind.Object)
@@ -375,6 +384,7 @@ public sealed class LocalUsageAnalyticsService
         using var reader = new StreamReader(bounded);
         string? line;
         var malformedLineCount = 0;
+        DateTimeOffset? lastUsageAt = null;
         while ((line = reader.ReadLine()) is not null)
         {
             try
@@ -397,6 +407,7 @@ public sealed class LocalUsageAnalyticsService
                     : current.Value.IsMonotonicAfter(before) ? current.Value - before : current.Value;
                 baseline = current;
                 var at = ReadTimestamp(root) ?? File.GetLastWriteTimeUtc(file);
+                lastUsageAt = MostRecent(lastUsageAt, at);
                 if (delta.Total > 0)
                 {
                     var key = new BucketKey(at.LocalDateTime.Date, model);
@@ -415,7 +426,7 @@ public sealed class LocalUsageAnalyticsService
             }
             catch (JsonException) { malformedLineCount++; }
         }
-        return new ParseAggregateResult(buckets, timeline, modelTimeline, baseline, model, malformedLineCount);
+        return new ParseAggregateResult(buckets, timeline, modelTimeline, baseline, model, lastUsageAt, malformedLineCount);
     }
 
     private static string? ReadString(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
@@ -428,8 +439,8 @@ public sealed class LocalUsageAnalyticsService
     private enum ParseKind { Partial, Rebuild, Append }
     private sealed record ParsePlan(FileDescriptor File, FileSignature Signature, CachedFile? Previous, ParseKind Kind, string FallbackModel);
     private sealed record ParsePlanResult(ParsePlan Plan, ParseAggregateResult? Parsed, Exception? Error);
-    private sealed record CachedFile(FileSignature Signature, bool IsFork, string FallbackModel, Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Totals? LastTotals, string LastModel, string PrefixMarker);
-    private sealed record ParseAggregateResult(Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Totals? LastTotals, string LastModel, int MalformedLineCount);
+    private sealed record CachedFile(FileSignature Signature, bool IsFork, string FallbackModel, Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Totals? LastTotals, string LastModel, DateTimeOffset? LastUsageAt, string PrefixMarker);
+    private sealed record ParseAggregateResult(Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Totals? LastTotals, string LastModel, DateTimeOffset? LastUsageAt, int MalformedLineCount);
     private readonly record struct FileSignature(long Length, long LastWriteUtcTicks)
     {
         public static FileSignature Create(string path)
@@ -505,9 +516,15 @@ public sealed class LocalUsageAnalyticsService
     {
         public static Aggregate operator +(Aggregate left, Aggregate right) => new(left.Input + right.Input, left.Cached + right.Cached, left.Output + right.Output, left.Reasoning + right.Reasoning, left.Total + right.Total);
     }
-    private readonly record struct ChatAggregate(string? ProjectPath, long Tokens, long PricedTokens, TokenUsageBreakdown Usage)
+    private readonly record struct ChatAggregate(string? ProjectPath, long Tokens, long PricedTokens, TokenUsageBreakdown Usage, DateTimeOffset? LastUpdatedAt)
     {
-        public static ChatAggregate Empty => new(null, 0, 0, TokenUsageBreakdown.Zero);
+        public static ChatAggregate Empty => new(null, 0, 0, TokenUsageBreakdown.Zero, null);
+    }
+
+    private static DateTimeOffset? MostRecent(DateTimeOffset? current, DateTimeOffset? candidate)
+    {
+        if (candidate is null || current is { } value && value >= candidate.Value) return current;
+        return candidate;
     }
 
     private static void MergeBuckets(Dictionary<BucketKey, Aggregate> destination, IReadOnlyDictionary<BucketKey, Aggregate> source)

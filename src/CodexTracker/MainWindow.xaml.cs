@@ -538,6 +538,18 @@ public partial class MainWindow : Window
         if (!_viewModel.HasAgentIndicator) _viewModel.IsAgentListOpen = false;
     }
 
+    private void MarkAllCompletedAgentsRead(object sender, RoutedEventArgs e)
+    {
+        if (_unreadAgentWorks.Count == 0) return;
+        _unreadAgentWorks.Clear();
+        PersistUnreadAgentWorks();
+        var previouslyVisibleIndicator = _viewModel.HasAgentIndicator;
+        _viewModel.MarkAllCompletedAgentsRead();
+        if (previouslyVisibleIndicator != _viewModel.HasAgentIndicator) ApplyCompactAgentIndicatorSize();
+        if (!_viewModel.HasAgentIndicator) _viewModel.IsAgentListOpen = false;
+        UpdateWidgetVisibility();
+    }
+
     private void PersistUnreadAgentWorks()
     {
         _unreadAgentWorks.Sort((left, right) => right.CompletedAt.CompareTo(left.CompletedAt));

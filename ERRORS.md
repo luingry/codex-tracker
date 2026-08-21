@@ -1,5 +1,19 @@
 # Erros e solucoes conhecidas
 
+## Chat sem projeto aparecia com diretorio transitorio como projeto
+
+- **Sintoma:** a lista de agents exibia o ultimo segmento de um `cwd` temporario, como `qu`, para um chat que nao pertencia a nenhum projeto; o rotulo esperado era `Sem projeto`.
+- **Causa:** `AgentActivityService` copiava o `cwd` bruto do `session_meta` para `ProjectPath`, tratando qualquer diretorio existente ou informado como um projeto.
+- **Solucao:** o servico agora resolve o `cwd` com `ProjectRootResolver`, guardando apenas uma raiz Git/worktree verificavel ou `null`; a heranca de subagents continua usando a raiz canonica do pai.
+- **Prevencao:** mantenha regressao para o `cwd` transitorio observado, um subdiretorio dentro de repositorio Git e um subagent que herda a raiz valida do pai; nao introduza heuristicas textuais para caminhos de sessoes do Codex.
+
+## Chat ativo perdia identidade nos detalhes por chat
+
+- **Sintoma:** um chat recente com rollout JSONL ainda aberto para escrita podia aparecer como conversa sem título/projeto ou deixar de aparecer no agrupamento esperado de detalhes por chat, embora seus tokens fossem contabilizados.
+- **Causa:** `LocalUsageAnalyticsService.Describe` usava `File.ReadLines`, cuja abertura não compartilhava escrita com o writer ativo do Codex. Ao falhar, o fallback usava o caminho físico como `ThreadId`; o parser de tokens posterior já usava `FileShare.ReadWrite`, criando uma linha com uso sem a identidade do chat.
+- **Solução:** a leitura limitada dos oito primeiros registros agora usa `FileStream` e `StreamReader` com `FileShare.ReadWrite`, preservando o metadata do rollout durante escrita concorrente.
+- **Prevenção:** manter uma regressão que segura uma fixture JSONL aberta para escrita enquanto chama o seam público `Read`, exigindo `ThreadId`, título e tokens corretos; leituras de JSONL append-only devem compartilhar escrita tanto no metadata quanto no parser de uso.
+
 ## Rollouts de manutencao de memories apareciam como agents do produto
 
 - **Sintoma:** a lista de agents mostrava trabalho interno cujo `cwd` era `%USERPROFILE%\\.codex\\memories`, incluindo roots concluidos e subagents ativos.

@@ -256,7 +256,8 @@ var roundedClipBorderSource = File.ReadAllText(Path.Combine(Directory.GetCurrent
 Assert(agentListTemplate.Contains("x:Name=\"AgentListWrapper\" Width=\"288\" MaxHeight=\"350\" Background=\"Transparent\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Border.Effect><DropShadowEffect BlurRadius=\"12\" ShadowDepth=\"3\" Opacity=\".28\" Color=\"#151A18\" /></Border.Effect>", StringComparison.Ordinal) && agentListTemplate.Contains("<local:RoundedClipBorder x:Name=\"AgentListClipSurface\" Padding=\"0\" CornerRadius=\"12\" Background=\"{DynamicResource DetailedSurface}\"", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"AgentRow\" Margin=\"0\"", StringComparison.Ordinal) && agentListTemplate.Contains("<ContentPresenter Margin=\"0,8\" HorizontalAlignment=\"{TemplateBinding HorizontalContentAlignment}\" VerticalAlignment=\"{TemplateBinding VerticalContentAlignment}\" />", StringComparison.Ordinal) && agentListTemplate.Contains("<Border Margin=\"{Binding Indent}\" Padding=\"15,6\">", StringComparison.Ordinal) && roundedClipBorderSource.Contains("Clip = new RectangleGeometry(new Rect(RenderSize), radius, radius);", StringComparison.Ordinal), "agent list keeps its shadow on an outer un-clipped wrapper while an inner dynamically sized rounded geometry clips every contiguous full-width row interaction");
 Assert(agentListTemplate.Contains("Text=\"{Binding ModelAndEffort}\"", StringComparison.Ordinal) && agentListTemplate.Contains("Foreground=\"{DynamicResource AgentMetadataAccent}\"", StringComparison.Ordinal), "agent model and effort bind to the contrast-safe muted accent resource instead of fixed opacity or generic secondary ink");
 Assert(agentListTemplate.Contains("Visibility=\"{Binding ShowsProjectSeparator, Converter={StaticResource BooleanToVisibility}}\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Grid.ColumnDefinitions><ColumnDefinition Width=\"Auto\" /><ColumnDefinition Width=\"*\" /></Grid.ColumnDefinitions>", StringComparison.Ordinal) && agentListTemplate.Contains("Text=\"{Binding ProjectName}\" FontSize=\"9.2\" FontWeight=\"SemiBold\" Foreground=\"{DynamicResource SoftInk}\" Opacity=\".62\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Border Grid.Column=\"1\" Height=\"1\" Background=\"{DynamicResource InputSurface}\" Opacity=\".65\" VerticalAlignment=\"Center\" Margin=\"8,0,0,0\" />", StringComparison.Ordinal), "agent projects render a subtle name-left divider with the project line extending to its right");
-Assert(agentListTemplate.Contains("<Grid.ColumnDefinitions><ColumnDefinition Width=\"Auto\" /><ColumnDefinition Width=\"*\" /></Grid.ColumnDefinitions>", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"KindLabel\" Text=\"{Binding Type}\" MaxWidth=\"58\"", StringComparison.Ordinal) && agentListTemplate.Contains("Margin=\"0,0,6,0\"", StringComparison.Ordinal) && agentListTemplate.Contains("Grid.Column=\"1\" Text=\"{Binding ModelAndEffort}\"", StringComparison.Ordinal) && agentListTemplate.Contains("TextTrimming=\"CharacterEllipsis\" HorizontalAlignment=\"Left\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Grid Grid.Column=\"1\" HorizontalAlignment=\"Right\" VerticalAlignment=\"Center\">", StringComparison.Ordinal) && agentListTemplate.Contains("<TranslateTransform Y=\"-9\" />", StringComparison.Ordinal) && !agentListTemplate.Contains("<StackPanel Grid.Column=\"1\" HorizontalAlignment=\"Right\" VerticalAlignment=\"Center\">", StringComparison.Ordinal) && !agentListTemplate.Contains("TextAlignment=\"Right\"", StringComparison.Ordinal), "completed-row check overlays above elapsed without changing the status-row height or pushing elapsed below reasoning");
+Assert(agentListTemplate.Contains("x:Name=\"MarkAllCompletedAgentsReadButton\"", StringComparison.Ordinal) && agentListTemplate.Contains("Panel.ZIndex=\"1\"", StringComparison.Ordinal) && agentListTemplate.Contains("HorizontalAlignment=\"Right\" VerticalAlignment=\"Top\"", StringComparison.Ordinal) && agentListTemplate.Contains("Background=\"{DynamicResource DetailedSurface}\"", StringComparison.Ordinal) && agentListTemplate.Contains("Visibility=\"{Binding CanMarkAllCompletedAgentsRead", StringComparison.Ordinal) && agentListTemplate.Contains("ToolTip=\"{DynamicResource Loc.MarkAllCompletedAgentsRead}\"", StringComparison.Ordinal) && agentListTemplate.Contains("AutomationProperties.Name=\"{DynamicResource Loc.MarkAllCompletedAgentsRead}\"", StringComparison.Ordinal) && agentListTemplate.Contains("Data=\"M2,12L7,17L16,8\"", StringComparison.Ordinal) && agentListTemplate.Contains("Data=\"M8,12L13,17L22,8\"", StringComparison.Ordinal), "the mark-all completed-work action is an accessible solid double-check overlay in the list's upper-right corner without reserving layout space");
+Assert(agentListTemplate.Contains("<Grid.ColumnDefinitions><ColumnDefinition Width=\"Auto\" /><ColumnDefinition Width=\"*\" /></Grid.ColumnDefinitions>", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"KindLabel\" Text=\"{Binding Type}\" MaxWidth=\"58\"", StringComparison.Ordinal) && agentListTemplate.Contains("Margin=\"0,0,6,0\"", StringComparison.Ordinal) && agentListTemplate.Contains("Grid.Column=\"1\" Text=\"{Binding ModelAndEffort}\"", StringComparison.Ordinal) && agentListTemplate.Contains("TextTrimming=\"CharacterEllipsis\" HorizontalAlignment=\"Left\"", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"StatusLabel\" Text=\"{Binding Status}\"", StringComparison.Ordinal) && agentListTemplate.Contains("<StackPanel x:Name=\"CompletedStatus\" Orientation=\"Horizontal\" Visibility=\"Collapsed\">", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"CompletedRowCheck\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Setter TargetName=\"StatusLabel\" Property=\"Visibility\" Value=\"Collapsed\" />", StringComparison.Ordinal) && agentListTemplate.Contains("<Setter TargetName=\"CompletedStatus\" Property=\"Visibility\" Value=\"Visible\" />", StringComparison.Ordinal) && !agentListTemplate.Contains("<TranslateTransform Y=\"-9\" />", StringComparison.Ordinal) && !agentListTemplate.Contains("TextAlignment=\"Right\"", StringComparison.Ordinal), "completed-row check sits immediately beside the completed status while elapsed remains right-aligned without increasing the status-row height");
 Assert(mainWindowXaml.Contains("Text=\"{Binding Tokens}\" FontFamily=\"./assets/fonts/#Source Sans 3\" FontSize=\"10\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Text=\"{Binding SecondaryText}\" FontFamily=\"./assets/fonts/#Source Sans 3\" FontSize=\"8\" Foreground=\"{DynamicResource SoftInk}\"", StringComparison.Ordinal) && !mainWindowXaml.Contains("Text=\"{Binding Cost}\"", StringComparison.Ordinal) && !mainWindowXaml.Contains("Text=\"{Binding TariffNote}\"", StringComparison.Ordinal), "ranking rows use exactly one small numeric secondary line below tokens for either the estimated cost or the localized no-tariff text");
 var tooltipPresentationSource = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "TokenUsageTooltip.cs"));
 var tokenTooltipAppXaml = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "App.xaml"));
@@ -336,6 +337,10 @@ var refreshAgentsCode = refreshAgentsStart >= 0 && refreshAgentsEnd > refreshAge
 Assert(refreshAgentsCode.Contains("else if (_settings.IsAgentListExpanded && !_viewModel.Expanded) _viewModel.IsAgentListOpen = true;", StringComparison.Ordinal), "agent refresh never opens the list while detailed mode is active");
 Assert(mainWindowCode.Contains("_unreadAgentWorks[index] = work with { Title = title.Trim() };", StringComparison.Ordinal) && mainWindowCode.Contains("if (unreadChanged)", StringComparison.Ordinal) && mainWindowCode.Contains("PersistUnreadAgentWorks();", StringComparison.Ordinal), "late app-server titles replace and persist fallback titles for unread completed work");
 Assert(mainWindowCode.Contains("_unreadAgentWorks.RemoveAll(work => activeThreadIds.Contains(work.ThreadId))", StringComparison.Ordinal), "agent refresh permanently discards an old unread completion when the same root chat starts running again");
+var markAllReadStart = mainWindowCode.IndexOf("private void MarkAllCompletedAgentsRead", StringComparison.Ordinal);
+var markAllReadEnd = mainWindowCode.IndexOf("private void PersistUnreadAgentWorks", markAllReadStart, StringComparison.Ordinal);
+var markAllReadCode = markAllReadStart >= 0 && markAllReadEnd > markAllReadStart ? mainWindowCode.Substring(markAllReadStart, markAllReadEnd - markAllReadStart) : string.Empty;
+Assert(markAllReadCode.Contains("_unreadAgentWorks.Clear();", StringComparison.Ordinal) && markAllReadCode.Split(new[] { "PersistUnreadAgentWorks();" }, StringSplitOptions.None).Length == 2 && markAllReadCode.Contains("_viewModel.MarkAllCompletedAgentsRead();", StringComparison.Ordinal) && !markAllReadCode.Contains("Process.Start", StringComparison.Ordinal), "mark-all clears unread completion persistence in one operation without opening chats");
 var toggleDetailedStart = mainWindowCode.IndexOf("private void ToggleDetailed", StringComparison.Ordinal);
 var toggleDetailedEnd = mainWindowCode.IndexOf("private void Settings", toggleDetailedStart, StringComparison.Ordinal);
 var toggleDetailedCode = toggleDetailedStart >= 0 && toggleDetailedEnd > toggleDetailedStart ? mainWindowCode.Substring(toggleDetailedStart, toggleDetailedEnd - toggleDetailedStart) : string.Empty;
@@ -370,6 +375,11 @@ agentRowsViewModel.ApplyAgents([restartedRoot], agentRowsNow.AddSeconds(10), tru
 agentRowsViewModel.ApplyUnreadCompletedAgents([unreadWork]);
 var restartedRow = agentRowsViewModel.AgentItems.Single();
 Assert(ReferenceEquals(completedRowBeforeRestart, restartedRow) && !restartedRow.IsCompleted && restartedRow.Status == LocalizationManager.TranslateKnown("Trabalhando") && restartedRow.Elapsed == "0m 05s" && !agentRowsViewModel.HasUnreadCompletedAgents, "restarting the same root chat reuses its row, updates status, and resets elapsed time without duplication");
+var markAllViewModel = new MainViewModel();
+var independentUnreadWork = unreadWork with { ThreadId = "completed-root", CompletionId = "completed-root:turn" };
+markAllViewModel.ApplyAgents([rootAgent], agentRowsNow, false);
+markAllViewModel.ApplyUnreadCompletedAgents([independentUnreadWork, independentUnreadWork with { CompletionId = "completed-root:older", CompletedAt = agentRowsNow.AddMinutes(-1) }, unreadWork with { ThreadId = "subagent-root", Type = "Subagent" }]);
+Assert(markAllViewModel.CanMarkAllCompletedAgentsRead && markAllViewModel.MarkAllCompletedAgentsRead() && !markAllViewModel.HasUnreadCompletedAgents && !markAllViewModel.CanMarkAllCompletedAgentsRead && markAllViewModel.AgentItems.Select(row => row.ThreadId).SequenceEqual(["root"]) && !markAllViewModel.MarkAllCompletedAgentsRead(), "mark-all removes only unread completed principal rows, immediately hides its state, and preserves active agents");
 
 var projectGroupsViewModel = new MainViewModel();
 var sameNameProjectA = rootAgent with { ThreadId = "project-a", Title = "Projeto A", ProjectPath = @"D:\Dev\same" };
@@ -604,7 +614,7 @@ File.WriteAllText(Path.Combine(chatUsageRoot, "root.jsonl"), """
 File.WriteAllText(Path.Combine(chatUsageRoot, "child.jsonl"), """
 {"type":"session_meta","payload":{"session_id":"child-session","id":"child-chat","parent_thread_id":"root-chat","thread_source":"subagent","cwd":"C:\\work\\project-alpha"}}
 {"timestamp":"2026-08-12T10:00:00Z","payload":{"type":"turn_context","model":"unknown-model"}}
-{"timestamp":"2026-08-12T10:00:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":50,"cached_input_tokens":10,"output_tokens":0}}}}
+{"timestamp":"2026-08-12T10:05:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":50,"cached_input_tokens":10,"output_tokens":0}}}}
 """ + Environment.NewLine);
 File.WriteAllText(Path.Combine(chatUsageRoot, "same-title.jsonl"), """
 {"type":"session_meta","payload":{"session_id":"other-session","id":"other-chat","cwd":"C:\\work\\project-alpha"}}
@@ -613,22 +623,31 @@ File.WriteAllText(Path.Combine(chatUsageRoot, "same-title.jsonl"), """
 """ + Environment.NewLine);
 var chatUsage = new LocalUsageAnalyticsService(() => analyticsNow).Read(5.5m, chatUsageRoot);
 var consolidatedChat = chatUsage.Chats!.Single(chat => chat.ThreadId == "root-chat");
-Assert(chatUsage.Chats!.Count == 2 && consolidatedChat.Tokens == 160 && consolidatedChat.Breakdown.TotalTokens == 160 && consolidatedChat.PricedTokens == 110 && consolidatedChat.CostUsd == consolidatedChat.Breakdown.TotalCostUsd, "explicit child usage consolidates once into its root chat while independently rooted chats remain distinct");
+Assert(chatUsage.Chats!.Count == 2 && consolidatedChat.Tokens == 160 && consolidatedChat.Breakdown.TotalTokens == 160 && consolidatedChat.PricedTokens == 110 && consolidatedChat.CostUsd == consolidatedChat.Breakdown.TotalCostUsd && consolidatedChat.LastUpdatedAt == new DateTimeOffset(2026, 8, 12, 10, 5, 0, TimeSpan.Zero), "explicit child usage consolidates once into its root chat while independently rooted chats retain the root flow's latest real usage timestamp");
 Assert(consolidatedChat.ProjectPath is null && consolidatedChat.Breakdown.CachedReadTokens + consolidatedChat.Breakdown.InputTokens + consolidatedChat.Breakdown.OutputTokens + consolidatedChat.Breakdown.ReasoningTokens == consolidatedChat.Tokens, "monthly chat snapshot rejects an unverifiable cwd while token categories continue to close exactly");
 var chatDetailsViewModel = new MainViewModel();
 var chatDetailsSnapshot = new RateLimitSnapshot([new("codex:primary", "Weekly", 20, analyticsNow.AddDays(4), 10080)], null, null, null, analyticsNow);
 chatDetailsViewModel.Apply(chatDetailsSnapshot, new UsageAnalytics(0, 185, .01m, .055m, 50, [], UsdBrl: 5.5m, Chats:
 [
     consolidatedChat with { ProjectPath = @"C:\work\project-alpha" },
-    new ChatUsage("missing-cwd", null, "Repeated title", 25, .0001m, 25, new TokenUsageBreakdown(0, 25, 0, 0, 0, .0001m)),
-    new ChatUsage("same-basename-other-root", @"D:\other\project-alpha", "Same basename", 1, .00001m, 1, new TokenUsageBreakdown(0, 1, 0, 0, 0, .00001m)),
-    new ChatUsage("same-casing-root", @"C:\WORK\PROJECT-ALPHA", "Same path casing", 1, .00001m, 1, new TokenUsageBreakdown(0, 1, 0, 0, 0, .00001m))
+    new ChatUsage("missing-cwd", null, "Repeated title", 25, .0001m, 25, new TokenUsageBreakdown(0, 25, 0, 0, 0, .0001m), analyticsNow.AddMinutes(-3)),
+    new ChatUsage("same-basename-other-root", @"D:\other\project-alpha", "Same basename", 1, .00001m, 1, new TokenUsageBreakdown(0, 1, 0, 0, 0, .00001m), analyticsNow.AddMinutes(-2)),
+    new ChatUsage("same-casing-root", @"C:\WORK\PROJECT-ALPHA", "Same path casing", 1, .00001m, 1, new TokenUsageBreakdown(0, 1, 0, 0, 0, .00001m), analyticsNow.AddMinutes(-1))
 ]), "BRL");
 Assert(chatDetailsViewModel.ChatProjects.Count == 3 && chatDetailsViewModel.ChatProjects.Count(project => project.Project == "project-alpha") == 2 && chatDetailsViewModel.ChatProjects.All(project => !project.IsExpanded && project.Chats.Count == 0) && chatDetailsViewModel.ChatProjects.All(project => !project.Project.Contains(@"C:\work", StringComparison.OrdinalIgnoreCase) && !project.Project.Contains(@"D:\other", StringComparison.OrdinalIgnoreCase)), "chat details use the complete normalized cwd as a case-insensitive hidden grouping identity, initially collapse every project, and never render local paths");
 var primaryAlpha = chatDetailsViewModel.ChatProjects.First(project => project.Project == "project-alpha");
 primaryAlpha.Toggle();
 var rootChatRow = primaryAlpha.Chats.Single(row => row.Title == LocalizationManager.Text("CodexConversation"));
 Assert(primaryAlpha.Chats.Count == 2 && rootChatRow.EstimateNote == LocalizationManager.Text("PartialTariffEstimate") && rootChatRow.CachedReadFraction == 30d / 160d && rootChatRow.InputFraction == 120d / 160d && rootChatRow.OutputFraction == 5d / 160d && rootChatRow.ReasoningFraction == 5d / 160d && rootChatRow.TotalFraction == 1d, "expanding a project materializes only its chats with exclusive category ratios over the chat total");
+var chatOrderingViewModel = new MainViewModel();
+chatOrderingViewModel.Apply(chatDetailsSnapshot, new UsageAnalytics(0, 101, 0, 0, 0, [], UsdBrl: 5.5m, Chats:
+[
+    new ChatUsage("older-high", @"C:\work\ordered", "Mais antigo", 100, 0, 0, TokenUsageBreakdown.Zero, analyticsNow.AddMinutes(-10)),
+    new ChatUsage("newer-low", @"C:\work\ordered", "Mais recente", 1, 0, 0, TokenUsageBreakdown.Zero, analyticsNow.AddMinutes(-1)),
+    new ChatUsage("newer-low-a", @"C:\work\ordered", "A desempate", 1, 0, 0, TokenUsageBreakdown.Zero, analyticsNow.AddMinutes(-1))
+]), "BRL");
+var orderedProject = chatOrderingViewModel.ChatProjects.Single(); orderedProject.Toggle();
+Assert(orderedProject.Chats.Select(chat => chat.Title).SequenceEqual(["A desempate", "Mais recente", "Mais antigo"]), "details by chat orders latest usage updates before token volume, then uses title and thread id as deterministic tie-breakers");
 chatDetailsViewModel.ChatSearch = "PROJECT-ALPHA";
 Assert(chatDetailsViewModel.ChatProjects.Count(project => project.IsVisible) == 2 && chatDetailsViewModel.ChatProjects.Where(project => project.IsVisible).All(project => !project.IsExpanded && project.Chats.Count == 0), "case-insensitive project search shows matching groups without autoexpanding or materializing chats");
 chatDetailsViewModel.ChatProjects.First(project => project.IsVisible).Toggle();
@@ -646,15 +665,15 @@ primaryAlpha.Toggle();
 chatDetailsViewModel.Apply(chatDetailsSnapshot, new UsageAnalytics(0, 185, .01m, .055m, 50, [], UsdBrl: 5.5m, Chats:
 [
     consolidatedChat,
-    new ChatUsage("missing-cwd", null, "Repeated title", 25, .0001m, 25, new TokenUsageBreakdown(0, 25, 0, 0, 0, .0001m)),
-    new ChatUsage("same-basename-other-root", @"D:\other\project-alpha", "Same basename", 1, .00001m, 1, new TokenUsageBreakdown(0, 1, 0, 0, 0, .00001m)),
-    new ChatUsage("same-casing-root", @"C:\WORK\PROJECT-ALPHA", "Same path casing", 1, .00001m, 1, new TokenUsageBreakdown(0, 1, 0, 0, 0, .00001m))
+    new ChatUsage("missing-cwd", null, "Repeated title", 25, .0001m, 25, new TokenUsageBreakdown(0, 25, 0, 0, 0, .0001m), analyticsNow.AddMinutes(-3)),
+    new ChatUsage("same-basename-other-root", @"D:\other\project-alpha", "Same basename", 1, .00001m, 1, new TokenUsageBreakdown(0, 1, 0, 0, 0, .00001m), analyticsNow.AddMinutes(-2)),
+    new ChatUsage("same-casing-root", @"C:\WORK\PROJECT-ALPHA", "Same path casing", 1, .00001m, 1, new TokenUsageBreakdown(0, 1, 0, 0, 0, .00001m), analyticsNow.AddMinutes(-1))
 ]), "BRL");
 Assert(chatDetailsViewModel.ChatProjects.First(project => project.Key.Equals(primaryAlpha.Key, StringComparison.OrdinalIgnoreCase)).IsExpanded, "analytics refresh preserves a manually expanded project by its hidden normalized project key");
 chatDetailsViewModel.ChatSearch = "repeated title";
 chatDetailsViewModel.Apply(chatDetailsSnapshot, new UsageAnalytics(0, 25, .0001m, .00055m, 100, [], UsdBrl: 5.5m, Chats:
 [
-    new ChatUsage("missing-cwd", null, "Repeated title", 25, .0001m, 25, new TokenUsageBreakdown(0, 25, 0, 0, 0, .0001m))
+    new ChatUsage("missing-cwd", null, "Repeated title", 25, .0001m, 25, new TokenUsageBreakdown(0, 25, 0, 0, 0, .0001m), analyticsNow.AddMinutes(-3))
 ]), "BRL");
 Assert(chatDetailsViewModel.HasVisibleChatProjects && !chatDetailsViewModel.ChatProjects.Single().IsExpanded && chatDetailsViewModel.ChatProjects.Single().Chats.Count == 0, "an active search remains applied without autoexpanding or materializing projects after analytics refresh");
 chatDetailsViewModel.ChatProjects.Single().Toggle();
@@ -664,10 +683,28 @@ Assert(chatDetailsViewModel.ChatSearch == "" && chatDetailsViewModel.HasVisibleC
 var zeroChatViewModel = new MainViewModel();
 zeroChatViewModel.Apply(chatDetailsSnapshot, new UsageAnalytics(0, 0, 0, 0, 0, [], UsdBrl: 5.5m, Chats:
 [
-    new ChatUsage("zero", null, "Zero", 0, 0, 0, TokenUsageBreakdown.Zero)
+    new ChatUsage("zero", null, "Zero", 0, 0, 0, TokenUsageBreakdown.Zero, analyticsNow)
 ]), "BRL");
 var zeroProject = zeroChatViewModel.ChatProjects.Single(); zeroProject.Toggle();
 Assert(zeroProject.Chats.Single().CachedReadFraction == 0 && zeroProject.Chats.Single().InputFraction == 0 && zeroProject.Chats.Single().OutputFraction == 0 && zeroProject.Chats.Single().ReasoningFraction == 0 && zeroProject.Chats.Single().TotalFraction == 0, "zero-token chat ratios remain finite and the total bar is zero when there is no total");
+var lockedRolloutDatabase = Path.Combine(chatUsageRoot, "locked-rollout.sqlite");
+using (var connection = new SqliteConnection("Data Source=" + lockedRolloutDatabase))
+{
+    connection.Open();
+    using var command = connection.CreateCommand();
+    command.CommandText = "CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT); INSERT INTO threads (id, title) VALUES ('locked-chat', 'Rollout aberto');";
+    command.ExecuteNonQuery();
+}
+var lockedRolloutPath = Path.Combine(chatUsageRoot, "locked-rollout.jsonl");
+File.WriteAllText(lockedRolloutPath, """
+{"timestamp":"2026-08-12T10:00:00Z","type":"session_meta","payload":{"session_id":"locked-session","id":"locked-chat"}}
+{"timestamp":"2026-08-12T10:01:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":2,"reasoning_output_tokens":0}}}}
+""" + Environment.NewLine);
+using (var lockedWriter = new FileStream(lockedRolloutPath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
+{
+    var lockedRollout = new LocalUsageAnalyticsService(() => analyticsNow, stateDatabasePath: lockedRolloutDatabase).Read(5.5m, chatUsageRoot).Chats!.Single(chat => chat.ThreadId == "locked-chat");
+    Assert(lockedRollout.Title == "Rollout aberto" && lockedRollout.Tokens == 12, "an actively writable rollout preserves its metadata identity, title, and token usage");
+}
 var titleOnlyDatabase = Path.Combine(chatUsageRoot, "title-only.sqlite");
 using (var connection = new SqliteConnection("Data Source=" + titleOnlyDatabase))
 {
@@ -937,16 +974,21 @@ Directory.Delete(divergentRoot, true);
 var activityRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-agent-activity-" + Guid.NewGuid());
 Directory.CreateDirectory(activityRoot);
 var activityNow = new DateTimeOffset(2026, 8, 14, 13, 30, 0, TimeSpan.Zero);
+var activityProjectRoot = Path.Combine(activityRoot, "project-root");
+var activityProjectSubdirectory = Path.Combine(activityProjectRoot, "src", "feature");
+Directory.CreateDirectory(Path.Combine(activityProjectRoot, ".git"));
+Directory.CreateDirectory(activityProjectSubdirectory);
+var activityProjectSubdirectoryJson = activityProjectSubdirectory.Replace("\\", "\\\\");
 var rootActivityPath = Path.Combine(activityRoot, "root.jsonl");
 File.WriteAllText(rootActivityPath, """
-{"timestamp":"2026-08-14T13:20:00Z","type":"session_meta","payload":{"session_id":"root-1","id":"root-1","thread_source":"user","cwd":"D:\\Dev\\codex-tracker"}}
+{"timestamp":"2026-08-14T13:20:00Z","type":"session_meta","payload":{"session_id":"root-1","id":"root-1","thread_source":"user","cwd":"$PROJECT_CWD$"}}
 {"timestamp":"2026-08-14T13:20:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-root"}}
 {"timestamp":"2026-08-14T13:20:02Z","type":"turn_context","payload":{"turn_id":"turn-root","model":"gpt-5.6-terra","effort":"medium"}}
 {"timestamp":"2026-08-14T13:29:45Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"  **Validando o build e os testes\ncom atencao aos detalhes"}}
 {"timestamp":"2026-08-14T13:29:47Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"   "}}
 {"timestamp":"2026-08-14T13:29:50Z","type":"event_msg","payload":{"type":"agent_message","phase":"commentary","message":"Validando o build\ncom detalhes"}}
 {"timestamp":"2026-08-14T13:29:52Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"commentary","text":"Output posterior diferente"}}
-""");
+""".Replace("$PROJECT_CWD$", activityProjectSubdirectoryJson));
 var subagentActivityPath = Path.Combine(activityRoot, "subagent.jsonl");
 File.WriteAllText(subagentActivityPath, """
 {"timestamp":"2026-08-14T13:26:00Z","type":"session_meta","payload":{"session_id":"root-1","id":"sub-1","parent_thread_id":"root-1","thread_source":"subagent","agent_path":"/root/ui_review"}}
@@ -965,6 +1007,18 @@ File.WriteAllText(rootBActivityPath, """
 {"timestamp":"2026-08-14T13:23:00Z","type":"session_meta","payload":{"session_id":"root-b","id":"root-b","thread_source":"user"}}
 {"timestamp":"2026-08-14T13:23:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-root-b"}}
 {"timestamp":"2026-08-14T13:29:53Z","type":"event_msg","payload":{"type":"token_count"}}
+""");
+var resolvedProjectActivityPath = Path.Combine(activityRoot, "resolved-project.jsonl");
+File.WriteAllText(resolvedProjectActivityPath, $"{{\"timestamp\":\"2026-08-14T13:29:30Z\",\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"resolved-project\",\"id\":\"resolved-project\",\"cwd\":\"{activityProjectSubdirectoryJson}\"}}}}\n{{\"timestamp\":\"2026-08-14T13:29:31Z\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_started\",\"turn_id\":\"resolved-project-turn\"}}}}\n");
+var inheritedProjectActivityPath = Path.Combine(activityRoot, "inherited-project.jsonl");
+File.WriteAllText(inheritedProjectActivityPath, """
+{"timestamp":"2026-08-14T13:29:32Z","type":"session_meta","payload":{"session_id":"resolved-project","id":"inherited-project","parent_thread_id":"resolved-project","thread_source":"subagent","cwd":"C:\\Users\\luing\\Documents\\Codex\\2026-08-21\\qu"}}
+{"timestamp":"2026-08-14T13:29:33Z","type":"event_msg","payload":{"type":"task_started","turn_id":"inherited-project-turn"}}
+""");
+var transientProjectActivityPath = Path.Combine(activityRoot, "transient-project.jsonl");
+File.WriteAllText(transientProjectActivityPath, """
+{"timestamp":"2026-08-14T13:29:34Z","type":"session_meta","payload":{"session_id":"transient-project","id":"transient-project","cwd":"C:\\Users\\luing\\Documents\\Codex\\2026-08-21\\qu"}}
+{"timestamp":"2026-08-14T13:29:35Z","type":"event_msg","payload":{"type":"task_started","turn_id":"transient-project-turn"}}
 """);
 var orphanActivityPath = Path.Combine(activityRoot, "orphan.jsonl");
 File.WriteAllText(orphanActivityPath, """
@@ -986,17 +1040,21 @@ File.SetLastWriteTimeUtc(rootActivityPath, activityNow.UtcDateTime);
 File.SetLastWriteTimeUtc(subagentActivityPath, activityNow.UtcDateTime);
 File.SetLastWriteTimeUtc(grandchildActivityPath, activityNow.UtcDateTime);
 File.SetLastWriteTimeUtc(rootBActivityPath, activityNow.UtcDateTime);
+File.SetLastWriteTimeUtc(resolvedProjectActivityPath, activityNow.UtcDateTime);
+File.SetLastWriteTimeUtc(inheritedProjectActivityPath, activityNow.UtcDateTime);
+File.SetLastWriteTimeUtc(transientProjectActivityPath, activityNow.UtcDateTime);
 File.SetLastWriteTimeUtc(orphanActivityPath, activityNow.UtcDateTime);
 File.SetLastWriteTimeUtc(cycleAActivityPath, activityNow.UtcDateTime);
 File.SetLastWriteTimeUtc(cycleBActivityPath, activityNow.UtcDateTime);
 var activityService = new AgentActivityService(() => activityNow);
 var activeAgents = activityService.Read(new Dictionary<string, string> { ["root-1"] = "Indicador de agentes" }, activityRoot);
-Assert(activeAgents.Count == 7, "active task markers expose roots, descendants, orphans and cycles exactly once");
-Assert(activeAgents.Select(agent => agent.ThreadId).SequenceEqual(["root-1", "sub-1", "grand-1", "root-b", "orphan", "cycle-a", "cycle-b"]), "active agents are depth-first by stable roots and descendants, with cycle fallback order");
+Assert(activeAgents.Count == 10, "active task markers expose roots, descendants, orphans and cycles exactly once");
+Assert(activeAgents.Select(agent => agent.ThreadId).SequenceEqual(["root-1", "sub-1", "grand-1", "root-b", "orphan", "resolved-project", "inherited-project", "transient-project", "cycle-a", "cycle-b"]), "active agents are depth-first by stable roots and descendants, with cycle fallback order");
 var activeRoot = activeAgents.Single(x => x.ThreadId == "root-1");
-Assert(activeRoot.Type == "Agent" && activeRoot.HierarchyDepth == 0 && activeRoot.Title == "Indicador de agentes" && activeRoot.Status == "Validando o build e os testes" && activeRoot.Model == "gpt-5.6-terra" && activeRoot.Effort == "medium" && activeRoot.ProjectPath == @"D:\Dev\codex-tracker", "principal activity preserves title, active reasoning, model, effort and session project even after later commentary");
+Assert(activeRoot.Type == "Agent" && activeRoot.HierarchyDepth == 0 && activeRoot.Title == "Indicador de agentes" && activeRoot.Status == "Validando o build e os testes" && activeRoot.Model == "gpt-5.6-terra" && activeRoot.Effort == "medium" && activeRoot.ProjectPath == Path.GetFullPath(activityProjectRoot), "principal activity preserves title, active reasoning, model, effort and canonical session project even after later commentary");
 var activeSubagent = activeAgents.Single(x => x.ThreadId == "sub-1");
-Assert(activeSubagent.Type == "Subagent" && activeSubagent.HierarchyDepth == 1 && activeSubagent.Title == "ui review" && activeSubagent.ParentThreadId == "root-1" && activeSubagent.Model == "gpt-5.6-luna" && activeSubagent.Effort == "low" && activeSubagent.ProjectPath == @"D:\Dev\codex-tracker", "subagent activity uses its own id, depth, inherited parent project and safe path fallback title");
+Assert(activeSubagent.Type == "Subagent" && activeSubagent.HierarchyDepth == 1 && activeSubagent.Title == "ui review" && activeSubagent.ParentThreadId == "root-1" && activeSubagent.Model == "gpt-5.6-luna" && activeSubagent.Effort == "low" && activeSubagent.ProjectPath == Path.GetFullPath(activityProjectRoot), "subagent activity uses its own id, depth, inherited canonical parent project and safe path fallback title");
+Assert(activeAgents.Single(agent => agent.ThreadId == "resolved-project").ProjectPath == Path.GetFullPath(activityProjectRoot) && activeAgents.Single(agent => agent.ThreadId == "inherited-project").ProjectPath == Path.GetFullPath(activityProjectRoot) && activeAgents.Single(agent => agent.ThreadId == "transient-project").ProjectPath is null, "agent projects resolve to their canonical Git root, inherit that root through subagents, and label a transient non-project cwd as Sem projeto");
 Assert(activeAgents.Single(x => x.ThreadId == "grand-1").HierarchyDepth == 2 && activeAgents.Single(x => x.ThreadId == "root-b").HierarchyDepth == 0 && activeAgents.Single(x => x.ThreadId == "orphan").HierarchyDepth == 0, "grandchildren nest while roots with missing parents remain visual roots");
 Assert(activeAgents.Single(x => x.ThreadId == "root-b").Model == "unknown" && activeAgents.Single(x => x.ThreadId == "root-b").Effort == "unknown", "missing turn context initially uses unknown metadata");
 File.AppendAllText(rootBActivityPath, "\n{\"timestamp\":\"2026-08-14T13:29:57Z\",\"payload\":{\"type\":\"turn_context\",\"model\":\"gpt-5.6-sol\",\"effort\":\"high\"}}\n");
@@ -1048,7 +1106,7 @@ File.SetLastWriteTimeUtc(rootActivityPath, activityNow.UtcDateTime.AddSeconds(2)
 Assert(activityService.Read(null, activityRoot).All(x => x.ThreadId != "root-1"), "matching task_complete removes the principal from the running list after a partial append completes");
 var completedSnapshot = activityService.ReadSnapshot(new Dictionary<string, string> { ["root-1"] = "Indicador de agentes" }, activityRoot);
 var completedRoot = completedSnapshot.CompletedAgentWorks.Single(work => work.ThreadId == "root-1");
-Assert(completedRoot.CompletionId == "root-1:turn-root" && completedRoot.Title == "Indicador de agentes" && completedRoot.Status == "Concluído" && completedRoot.CompletedAt == new DateTimeOffset(2026, 8, 14, 13, 29, 58, TimeSpan.Zero) && completedRoot.ProjectPath == @"D:\Dev\codex-tracker", "principal task completion remains addressable with its title, project and exact turn identity for unread tracking");
+Assert(completedRoot.CompletionId == "root-1:turn-root" && completedRoot.Title == "Indicador de agentes" && completedRoot.Status == "Concluído" && completedRoot.CompletedAt == new DateTimeOffset(2026, 8, 14, 13, 29, 58, TimeSpan.Zero) && completedRoot.ProjectPath == Path.GetFullPath(activityProjectRoot), "principal task completion remains addressable with its title, canonical project and exact turn identity for unread tracking");
 File.AppendAllText(subagentActivityPath, "\n{\"timestamp\":\"2026-08-14T13:29:59Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"turn-sub\"}}\n");
 File.SetLastWriteTimeUtc(subagentActivityPath, activityNow.UtcDateTime.AddSeconds(3));
 Assert(activityService.ReadSnapshot(null, activityRoot).CompletedAgentWorks.All(work => work.ThreadId != "sub-1"), "subagent completions never enter the unread principal-work list");

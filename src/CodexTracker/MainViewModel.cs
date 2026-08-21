@@ -221,6 +221,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public bool Topmost { get => _topmost; set => Set(ref _topmost, value); }
     public bool HasActiveAgents { get => _hasActiveAgents; private set => Set(ref _hasActiveAgents, value); }
     public bool HasUnreadCompletedAgents { get => _hasUnreadCompletedAgents; private set => Set(ref _hasUnreadCompletedAgents, value); }
+    public bool CanMarkAllCompletedAgentsRead => HasUnreadCompletedAgents;
     public bool HasAgentIndicator => HasActiveAgents || HasUnreadCompletedAgents;
     public bool ShowsCompletedIndicator => !HasActiveAgents && HasUnreadCompletedAgents;
     public string AgentIndicatorTooltip => LocalizationManager.Text(ShowsCompletedIndicator ? "UnreadAgentCompletions" : "AgentsWorkingTooltip");
@@ -307,6 +308,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
         RefreshAgentItems();
     }
 
+    public bool MarkAllCompletedAgentsRead()
+    {
+        if (_completedAgentRows.Count == 0) return false;
+        _completedAgentRows = [];
+        UpdateUnreadCompletedState();
+        RefreshAgentItems();
+        return true;
+    }
+
     private void UpdateUnreadCompletedState()
     {
         UnreadCompletedAgentCount = _completedAgentRows.Count;
@@ -314,6 +324,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new(nameof(HasAgentIndicator)));
         PropertyChanged?.Invoke(this, new(nameof(ShowsCompletedIndicator)));
         PropertyChanged?.Invoke(this, new(nameof(AgentIndicatorTooltip)));
+        PropertyChanged?.Invoke(this, new(nameof(CanMarkAllCompletedAgentsRead)));
     }
 
     private void RefreshAgentItems()
@@ -444,7 +455,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
             .OrderBy(group => group.Name, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
         {
-            var rows = project.Chats.OrderByDescending(chat => chat.Tokens).Select(FormatChat).ToArray();
+            var rows = project.Chats
+                .OrderByDescending(chat => chat.LastUpdatedAt)
+                .ThenByDescending(chat => chat.Tokens)
+                .ThenBy(chat => chat.Title ?? "", StringComparer.OrdinalIgnoreCase)
+                .ThenBy(chat => chat.ThreadId, StringComparer.OrdinalIgnoreCase)
+                .Select(FormatChat)
+                .ToArray();
             var projectRow = new ChatDetailsProjectRow(project.Key, project.Name, rows);
             if (string.IsNullOrWhiteSpace(ChatSearch) && expandedKeys.Contains(project.Key)) projectRow.SetExpanded(true);
             else projectRow.ApplySearch(ChatSearch);
