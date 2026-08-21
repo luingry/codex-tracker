@@ -1,5 +1,12 @@
 # Erros e solucoes conhecidas
 
+## Rollouts de manutencao de memories apareciam como agents do produto
+
+- **Sintoma:** a lista de agents mostrava trabalho interno cujo `cwd` era `%USERPROFILE%\\.codex\\memories`, incluindo roots concluidos e subagents ativos.
+- **Causa:** `AgentActivityService` preservava o `cwd` do primeiro `session_meta`, mas nao o usava para decidir se o rollout era exibivel.
+- **Solucao:** o servico marca, no primeiro metadata, caminhos canonicos iguais ou descendentes de `%USERPROFILE%\\.codex\\memories` e os exclui antes da deduplicacao por `ThreadId` nas listas ativa e concluida.
+- **Prevencao:** mantenha cobertura para a raiz, descendentes, comparacoes sem distincao de maiusculas/minusculas e prefixos irmaos como `memories-sibling`; `cwd` ausente ou invalido deve continuar visivel.
+
 ## Fixture SQLite não liberava o arquivo temporário no Windows
 
 - **Sintoma:** o cleanup da fixture de títulos por chat falhava com `IOException` ao apagar o banco SQLite temporário após a consulta.

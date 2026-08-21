@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.5] - 2026-08-21
+
+### Fixed
+
+- Excluded Codex memory-maintenance rollouts from active-agent and unread completed-work lists while retaining normal sessions and subagents.
+
 ## [0.18.4] - 2026-08-20
 
 ### Changed

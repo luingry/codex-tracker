@@ -89,7 +89,7 @@ public sealed class AgentActivityService
 
         var activeStates = _cache.Values
             .Select(value => value.State)
-            .Where(state => state.ActiveTurnId is not null && state.StartedAt is not null && state.LastActivityAt >= cutoff)
+            .Where(state => !state.IsMemorySession && state.ActiveTurnId is not null && state.StartedAt is not null && state.LastActivityAt >= cutoff)
             .GroupBy(state => state.ThreadId, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderByDescending(state => state.LastActivityAt).First())
             .ToArray();
@@ -101,7 +101,7 @@ public sealed class AgentActivityService
             .ToArray();
         var completedAgents = _cache.Values
             .Select(value => value.State)
-            .Where(state => !state.IsSubagent && state.CompletedAt is not null && !string.IsNullOrWhiteSpace(state.CompletedTurnId))
+            .Where(state => !state.IsMemorySession && !state.IsSubagent && state.CompletedAt is not null && !string.IsNullOrWhiteSpace(state.CompletedTurnId))
             .GroupBy(state => state.ThreadId, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderByDescending(state => state.CompletedAt).First())
             .OrderByDescending(state => state.CompletedAt)
@@ -215,7 +215,8 @@ public sealed class AgentActivityService
                     var threadId = ReadString(payload, "id") ?? ReadString(payload, "session_id") ?? path;
                     var source = ReadString(payload, "thread_source");
                     var parent = ReadString(payload, "parent_thread_id") ?? ReadString(payload, "forked_from_id");
-                    state = state with { ThreadId = threadId, ParentThreadId = parent, IsSubagent = source == "subagent" || !string.IsNullOrWhiteSpace(parent), AgentPath = ReadString(payload, "agent_path"), AgentNickname = ReadString(payload, "agent_nickname"), ProjectPath = ReadString(payload, "cwd") };
+                    var projectPath = ReadString(payload, "cwd");
+                    state = state with { ThreadId = threadId, ParentThreadId = parent, IsSubagent = source == "subagent" || !string.IsNullOrWhiteSpace(parent), AgentPath = ReadString(payload, "agent_path"), AgentNickname = ReadString(payload, "agent_nickname"), ProjectPath = projectPath, IsMemorySession = IsMemoryPath(projectPath) };
                     continue;
                 }
 
@@ -263,6 +264,34 @@ public sealed class AgentActivityService
 
     private static string? ReadString(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     private static DateTimeOffset? ReadTimestamp(JsonElement element) => ReadString(element, "timestamp") is { } value && DateTimeOffset.TryParse(value, out var timestamp) ? timestamp.ToUniversalTime() : null;
+
+    private static bool IsMemoryPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        try
+        {
+            var memoriesRoot = NormalizePath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "memories"));
+            var candidate = NormalizePath(Environment.ExpandEnvironmentVariables(path));
+            if (string.IsNullOrEmpty(memoriesRoot) || string.IsNullOrEmpty(candidate)) return false;
+            return string.Equals(candidate, memoriesRoot, StringComparison.OrdinalIgnoreCase) ||
+                   (candidate.Length > memoriesRoot.Length && candidate.StartsWith(memoriesRoot, StringComparison.OrdinalIgnoreCase) && IsDirectorySeparator(candidate[memoriesRoot.Length]));
+        }
+        catch (ArgumentException) { return false; }
+        catch (NotSupportedException) { return false; }
+        catch (PathTooLongException) { return false; }
+        catch (System.Security.SecurityException) { return false; }
+    }
+
+    private static string NormalizePath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(fullPath);
+        return string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase)
+            ? fullPath
+            : fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    private static bool IsDirectorySeparator(char value) => value == Path.DirectorySeparatorChar || value == Path.AltDirectorySeparatorChar;
     private bool ShouldRetainCachedFile(FileInfo file, DateTimeOffset cutoff)
     {
         if (!_cache.TryGetValue(file.FullName, out var cached)) return false;
@@ -290,8 +319,8 @@ public sealed class AgentActivityService
     private sealed record CachedRollout(RolloutSignature Signature, bool HadFinalNewline, RolloutState State);
     private readonly record struct RolloutSignature(long Length, long LastWriteUtcTicks);
     private sealed record OrderedState(RolloutState State, int Depth);
-    private sealed record RolloutState(string ThreadId, string? ParentThreadId, bool IsSubagent, string? AgentPath, string? AgentNickname, string? ProjectPath, string? ActiveTurnId, DateTimeOffset? StartedAt, string? CompletedTurnId, DateTimeOffset? CompletedStartedAt, DateTimeOffset? CompletedAt, DateTimeOffset LastActivityAt, string Model, string Effort, string Status)
+    private sealed record RolloutState(string ThreadId, string? ParentThreadId, bool IsSubagent, string? AgentPath, string? AgentNickname, string? ProjectPath, bool IsMemorySession, string? ActiveTurnId, DateTimeOffset? StartedAt, string? CompletedTurnId, DateTimeOffset? CompletedStartedAt, DateTimeOffset? CompletedAt, DateTimeOffset LastActivityAt, string Model, string Effort, string Status)
     {
-        public static RolloutState Empty { get; } = new("", null, false, null, null, null, null, null, null, null, null, DateTimeOffset.MinValue, "unknown", "unknown", "Trabalhando");
+        public static RolloutState Empty { get; } = new("", null, false, null, null, null, false, null, null, null, null, null, DateTimeOffset.MinValue, "unknown", "unknown", "Trabalhando");
     }
 }

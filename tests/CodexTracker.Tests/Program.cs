@@ -1052,6 +1052,30 @@ Assert(completedRoot.CompletionId == "root-1:turn-root" && completedRoot.Title =
 File.AppendAllText(subagentActivityPath, "\n{\"timestamp\":\"2026-08-14T13:29:59Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"turn-sub\"}}\n");
 File.SetLastWriteTimeUtc(subagentActivityPath, activityNow.UtcDateTime.AddSeconds(3));
 Assert(activityService.ReadSnapshot(null, activityRoot).CompletedAgentWorks.All(work => work.ThreadId != "sub-1"), "subagent completions never enter the unread principal-work list");
+var memoryRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "memories");
+var memoryActivityPath = Path.Combine(activityRoot, "memory-root.jsonl");
+var memoryCompletedPath = Path.Combine(activityRoot, "memory-descendant-completed.jsonl");
+var memoryPrefixPath = Path.Combine(activityRoot, "memory-prefix.jsonl");
+var normalActivityPath = Path.Combine(activityRoot, "normal-project.jsonl");
+var invalidPath = Path.Combine(activityRoot, "invalid-cwd.jsonl");
+var memoryRootJson = memoryRoot.Replace("\\", "\\\\");
+var memoryDescendantJson = Path.Combine(memoryRoot, "rollout_summaries").Replace("\\", "\\\\");
+var memoryPrefixJson = (memoryRoot + "-sibling").Replace("\\", "\\\\");
+File.WriteAllText(memoryActivityPath, $"{{\"timestamp\":\"2026-08-14T13:29:00Z\",\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"memory-root\",\"id\":\"memory-root\",\"cwd\":\"{memoryRootJson}\"}}}}\n{{\"timestamp\":\"2026-08-14T13:29:01Z\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_started\",\"turn_id\":\"memory-root-turn\"}}}}\n");
+File.WriteAllText(memoryCompletedPath, $"{{\"timestamp\":\"2026-08-14T13:29:00Z\",\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"memory-completed\",\"id\":\"memory-completed\",\"cwd\":\"{memoryDescendantJson}\"}}}}\n{{\"timestamp\":\"2026-08-14T13:29:01Z\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_started\",\"turn_id\":\"memory-completed-turn\"}}}}\n{{\"timestamp\":\"2026-08-14T13:29:02Z\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_complete\",\"turn_id\":\"memory-completed-turn\"}}}}\n");
+File.WriteAllText(memoryPrefixPath, $"{{\"timestamp\":\"2026-08-14T13:29:00Z\",\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"memory-prefix\",\"id\":\"memory-prefix\",\"cwd\":\"{memoryPrefixJson}\"}}}}\n{{\"timestamp\":\"2026-08-14T13:29:01Z\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_started\",\"turn_id\":\"memory-prefix-turn\"}}}}\n");
+File.WriteAllText(normalActivityPath, """
+{"timestamp":"2026-08-14T13:29:00Z","type":"session_meta","payload":{"session_id":"normal-project","id":"normal-project","cwd":"D:\\Dev\\codex-tracker"}}
+{"timestamp":"2026-08-14T13:29:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"normal-project-turn"}}
+""");
+File.WriteAllText(invalidPath, """
+{"timestamp":"2026-08-14T13:29:00Z","type":"session_meta","payload":{"session_id":"invalid-cwd","id":"invalid-cwd","cwd":"\u0000"}}
+{"timestamp":"2026-08-14T13:29:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"invalid-cwd-turn"}}
+""");
+foreach (var path in new[] { memoryActivityPath, memoryCompletedPath, memoryPrefixPath, normalActivityPath, invalidPath }) File.SetLastWriteTimeUtc(path, activityNow.UtcDateTime.AddSeconds(4));
+var memoryFilteredSnapshot = activityService.ReadSnapshot(null, activityRoot);
+Assert(!memoryFilteredSnapshot.ActiveAgents.Any(agent => agent.ThreadId == "memory-root") && !memoryFilteredSnapshot.CompletedAgentWorks.Any(work => work.ThreadId == "memory-completed"), "memory-root active work and memory-descendant completed work are excluded from the agent lists");
+Assert(memoryFilteredSnapshot.ActiveAgents.Any(agent => agent.ThreadId == "memory-prefix") && memoryFilteredSnapshot.ActiveAgents.Any(agent => agent.ThreadId == "normal-project") && memoryFilteredSnapshot.ActiveAgents.Any(agent => agent.ThreadId == "invalid-cwd"), "a sibling sharing the memories prefix, a normal project session, and an invalid cwd remain visible");
 var staleActivityPath = Path.Combine(activityRoot, "stale.jsonl");
 File.WriteAllText(staleActivityPath, """
 {"timestamp":"2026-08-14T12:00:00Z","type":"session_meta","payload":{"session_id":"stale","id":"stale","thread_source":"user"}}
